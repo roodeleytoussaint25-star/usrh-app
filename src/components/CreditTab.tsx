@@ -87,7 +87,7 @@ export function CreditTab() {
     return (
       <div className="flex flex-col items-center py-14 text-center">
         {soldeMsg && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#1A1210] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-xl whitespace-nowrap">
             {soldeMsg}
           </div>
         )}
@@ -105,7 +105,7 @@ export function CreditTab() {
   return (
     <div className="space-y-4">
       {soldeMsg && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#1A1210] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-xl whitespace-nowrap">
           {soldeMsg}
         </div>
       )}

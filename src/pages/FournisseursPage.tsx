@@ -206,7 +206,7 @@ export function FournisseursPage() {
   return (
     <div className="p-4 space-y-4 pb-24">
       {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#1A1210] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-xl whitespace-nowrap">
           {toast}
         </div>
       )}
