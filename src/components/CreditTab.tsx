@@ -72,7 +72,7 @@ export function CreditTab() {
     setNotesPay('')
     setSaving(false)
     if (statut === 'completee') {
-      setSoldeMsg('Crédit soldé ✓')
+      setSoldeMsg('Crédit soldé')
       setTimeout(() => setSoldeMsg(null), 3000)
     }
     await loadCredits()

@@ -174,7 +174,7 @@ export function StockPage() {
     }
     setSaving(false); setModalOpen(false)
     await loadData()
-    showToast(editProduit ? 'Produit modifié ✓' : 'Produit ajouté ✓')
+    showToast(editProduit ? 'Produit modifié' : 'Produit ajouté')
   }
 
   const handleToggleActif = async (p: Produit) => {

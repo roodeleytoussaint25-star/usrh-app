@@ -143,7 +143,7 @@ export function FournisseursPage() {
 
       setProduitId(''); setQuantite(''); setPrixUnitaire('')
       await loadData()
-      showToast('Achat enregistré ✓')
+      showToast('Achat enregistré')
     } catch {
       setError('Une erreur est survenue')
     } finally {
@@ -164,7 +164,7 @@ export function FournisseursPage() {
     setSavingDep(false)
     if (err) { setErrorDep('Erreur lors de l\'enregistrement'); return }
     setDepDescription(''); setDepMontant('')
-    showToast('Dépense enregistrée ✓')
+    showToast('Dépense enregistrée')
   }
 
   const handleMarkPaid = async (achatId: string) => {
@@ -172,7 +172,7 @@ export function FournisseursPage() {
     await supabase.from('mla_achats').update({ statut_paiement: 'paye' }).eq('id', achatId)
     setMarkingPaid(null)
     await loadData()
-    showToast('Marqué comme payé ✓')
+    showToast('Marqué comme payé')
   }
 
   const handleDeleteAchat = async (id: string) => {
@@ -196,7 +196,7 @@ export function FournisseursPage() {
     }
     setSavingF(false); setModalOpen(false)
     await loadData()
-    showToast(editF ? 'Fournisseur modifié ✓' : 'Fournisseur ajouté ✓')
+    showToast(editF ? 'Fournisseur modifié' : 'Fournisseur ajouté')
   }
 
   const visibleAchats = showAll ? achats : achats.slice(0, 5)
