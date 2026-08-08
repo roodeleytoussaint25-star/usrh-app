@@ -154,6 +154,18 @@ export function VentesPage() {
   const removeFromCart = (produitId: string) =>
     setCart(prev => prev.filter(i => i.produit.id !== produitId))
 
+  const updateQtyInCart = (produitId: string, newQty: number) => {
+    if (!newQty || newQty < 1) return
+    const item = cart.find(i => i.produit.id === produitId)
+    if (!item) return
+    if (newQty > item.produit.quantite) {
+      setError(`Stock insuffisant pour "${item.produit.nom}" (dispo: ${item.produit.quantite})`)
+      return
+    }
+    setError('')
+    setCart(prev => prev.map(i => i.produit.id === produitId ? { ...i, quantite: newQty } : i))
+  }
+
   // ── Totaux ─────────────────────────────────────────────────────────────────
 
   const sousTotal  = cart.reduce((acc, i) => acc + i.quantite * i.prix_unitaire, 0)
@@ -423,7 +435,20 @@ export function VentesPage() {
                           <td className="px-3 py-2.5 text-[#2C2420] font-medium max-w-[100px]">
                             <span className="block truncate">{item.produit.nom}</span>
                           </td>
-                          <td className="px-2 py-2.5 text-center text-[#78726A]">{item.quantite}</td>
+                          <td className="px-1 py-1.5 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              max={item.produit.quantite}
+                              value={item.quantite}
+                              onChange={e => {
+                                const v = parseInt(e.target.value)
+                                if (!isNaN(v)) updateQtyInCart(item.produit.id, v)
+                              }}
+                              onFocus={e => e.target.select()}
+                              className="w-14 text-center border border-[#D4CAB8] rounded-lg py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#3DAA35]"
+                            />
+                          </td>
                           <td className="px-2 py-2.5 text-right text-[#78726A] whitespace-nowrap">
                             {item.prix_unitaire.toLocaleString()} G
                           </td>

@@ -4,9 +4,9 @@ import { Modal } from '../components/ui/Modal'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 import { formatHTG } from '../lib/utils'
-import { Plus, Truck, Phone, Mail, User, Building2, Trash2, DollarSign } from 'lucide-react'
+import { Plus, Truck, Phone, Mail, User, Building2, Trash2, DollarSign, CheckCircle, ShoppingBag } from 'lucide-react'
 import { ProductSearch } from '../components/ProductSearch'
-import type { Fournisseur, Produit } from '../types'
+import type { Fournisseur, Produit, DepenseCategorie } from '../types'
 
 interface AchatRow {
   id: string
@@ -16,7 +16,6 @@ interface AchatRow {
   date_achat: string
   created_at: string
   mla_fournisseurs: { nom: string } | null
-  lignes_count?: number
 }
 
 function pad(n: number) { return String(n).padStart(2, '0') }
@@ -25,12 +24,27 @@ function fmtDate(iso: string) {
   return `${pad(d.getDate())} ${['jan', 'fév', 'mar', 'avr', 'mai', 'jun', 'jul', 'aoû', 'sep', 'oct', 'nov', 'déc'][d.getMonth()]} ${d.getFullYear()}`
 }
 
+type FormTab = 'achat' | 'depense'
+
+const CATEGORIES_DEP: { value: DepenseCategorie; label: string }[] = [
+  { value: 'loyer', label: 'Loyer' },
+  { value: 'salaires', label: 'Salaires' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'electricite', label: 'Électricité' },
+  { value: 'eau', label: 'Eau' },
+  { value: 'stockage', label: 'Stockage' },
+  { value: 'autres', label: 'Autres' },
+]
+
 export function FournisseursPage() {
   const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([])
   const [produits, setProduits] = useState<Produit[]>([])
   const [achats, setAchats] = useState<AchatRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showAll, setShowAll] = useState(false)
+  const [formTab, setFormTab] = useState<FormTab>('achat')
+  const [toast, setToast] = useState<string | null>(null)
+  const [markingPaid, setMarkingPaid] = useState<string | null>(null)
 
   // Formulaire achat rapide
   const [fournisseurId, setFournisseurId] = useState('')
@@ -41,6 +55,13 @@ export function FournisseursPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Formulaire dépense générale
+  const [depCategorie, setDepCategorie] = useState<DepenseCategorie>('autres')
+  const [depDescription, setDepDescription] = useState('')
+  const [depMontant, setDepMontant] = useState('')
+  const [savingDep, setSavingDep] = useState(false)
+  const [errorDep, setErrorDep] = useState('')
+
   // Modal fournisseur
   const [modalOpen, setModalOpen] = useState(false)
   const [editF, setEditF] = useState<Fournisseur | null>(null)
@@ -49,6 +70,11 @@ export function FournisseursPage() {
   const [formTel, setFormTel] = useState('')
   const [formEmail, setFormEmail] = useState('')
   const [savingF, setSavingF] = useState(false)
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 2500)
+  }
 
   useEffect(() => { loadData() }, [])
 
@@ -75,7 +101,7 @@ export function FournisseursPage() {
     else setPrixUnitaire('')
   }
 
-  const handleSave = async () => {
+  const handleSaveAchat = async () => {
     if (!fournisseurId) { setError('Choisissez un fournisseur'); return }
     if (!produitId) { setError('Choisissez un produit'); return }
     const qte = parseFloat(quantite)
@@ -115,8 +141,9 @@ export function FournisseursPage() {
           .eq('id', produitId)
       }
 
-      setFournisseurId(''); setProduitId(''); setQuantite(''); setPrixUnitaire(''); setStatutPaiement('paye')
+      setProduitId(''); setQuantite(''); setPrixUnitaire('')
       await loadData()
+      showToast('Achat enregistré ✓')
     } catch {
       setError('Une erreur est survenue')
     } finally {
@@ -124,7 +151,31 @@ export function FournisseursPage() {
     }
   }
 
-  const handleDelete = async (id: string) => {
+  const handleSaveDepense = async () => {
+    const montant = parseFloat(depMontant)
+    if (!montant || montant <= 0) { setErrorDep('Montant invalide'); return }
+    setSavingDep(true); setErrorDep('')
+    const { error: err } = await supabase.from('mla_depenses').insert({
+      categorie: depCategorie,
+      description: depDescription.trim() || null,
+      montant,
+      date_depense: new Date().toISOString().split('T')[0],
+    })
+    setSavingDep(false)
+    if (err) { setErrorDep('Erreur lors de l\'enregistrement'); return }
+    setDepDescription(''); setDepMontant('')
+    showToast('Dépense enregistrée ✓')
+  }
+
+  const handleMarkPaid = async (achatId: string) => {
+    setMarkingPaid(achatId)
+    await supabase.from('mla_achats').update({ statut_paiement: 'paye' }).eq('id', achatId)
+    setMarkingPaid(null)
+    await loadData()
+    showToast('Marqué comme payé ✓')
+  }
+
+  const handleDeleteAchat = async (id: string) => {
     await supabase.from('mla_achats').delete().eq('id', id)
     setAchats(prev => prev.filter(a => a.id !== id))
   }
@@ -145,6 +196,7 @@ export function FournisseursPage() {
     }
     setSavingF(false); setModalOpen(false)
     await loadData()
+    showToast(editF ? 'Fournisseur modifié ✓' : 'Fournisseur ajouté ✓')
   }
 
   const visibleAchats = showAll ? achats : achats.slice(0, 5)
@@ -153,12 +205,17 @@ export function FournisseursPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24">
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+          {toast}
+        </div>
+      )}
 
       {/* Header */}
       <div>
         <h2 className="text-2xl font-black tracking-tight text-[#1A1210]">Fournisseurs</h2>
         <div className="w-10 h-0.5 bg-[#8B6400] rounded-full mt-1 mb-0.5" />
-        <p className="text-[11px] text-[#A09589]">Gérez vos fournisseurs et achats</p>
+        <p className="text-[11px] text-[#A09589]">Achats et dépenses</p>
       </div>
 
       {/* Bouton + Fournisseur */}
@@ -167,92 +224,152 @@ export function FournisseursPage() {
         className="w-full flex items-center justify-center gap-2 bg-[#2D6B2D] hover:bg-[#1E4E1E] text-white font-bold py-3.5 rounded-xl text-sm transition-colors shadow-sm"
       >
         <Plus size={17} />
-        Fournisseur
+        Nouveau fournisseur
       </button>
 
-      {/* ── ACHAT RAPIDE ─────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-[#D4CAB8] shadow-sm p-4 space-y-3">
-        <div className="flex items-start gap-2.5">
-          <div className="w-8 h-8 bg-[#EEF7EE] rounded-xl flex items-center justify-center shrink-0">
-            <DollarSign size={16} className="text-[#3DAA35]" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-[#1A1210]">Achat rapide</p>
-            <p className="text-[11px] text-[#A09589]">Enregistrez un achat fournisseur</p>
-          </div>
-        </div>
-
-        {/* Fournisseur */}
-        <select
-          value={fournisseurId}
-          onChange={e => setFournisseurId(e.target.value)}
-          className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
-        >
-          <option value="">Choisir un fournisseur...</option>
-          {fournisseurs.map(f => (
-            <option key={f.id} value={f.id}>{f.nom}</option>
-          ))}
-        </select>
-
-        {/* Produit + Quantité */}
-        <div className="grid grid-cols-2 gap-2.5">
-          <ProductSearch
-            produits={produits}
-            onSelect={p => p ? handleProduitChange(p.id) : (setProduitId(''), setPrixUnitaire(''))}
-            placeholder="Chercher produit..."
-          />
-          <input
-            type="number"
-            min="0"
-            step="any"
-            placeholder="Quantité"
-            value={quantite}
-            onChange={e => setQuantite(e.target.value)}
-            className="border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
-          />
-        </div>
-
-        {/* Prix + À payer */}
-        <div className="grid grid-cols-2 gap-2.5">
-          <input
-            type="number"
-            min="0"
-            step="any"
-            placeholder="Prix unitaire G"
-            value={prixUnitaire}
-            onChange={e => setPrixUnitaire(e.target.value)}
-            className="border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
-          />
-          <select
-            value={statutPaiement}
-            onChange={e => setStatutPaiement(e.target.value as 'paye' | 'credit')}
-            className="border border-[#D4CAB8] rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+      {/* ── FORMULAIRE ACHAT / DÉPENSE ──────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-[#D4CAB8] shadow-sm overflow-hidden">
+        {/* Tabs achat / dépense */}
+        <div className="flex border-b border-[#D4CAB8]">
+          <button
+            onClick={() => setFormTab('achat')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-colors ${
+              formTab === 'achat' ? 'text-[#2D6B2D] border-b-2 border-[#2D6B2D]' : 'text-[#A09589]'
+            }`}
           >
-            <option value="paye">Payé</option>
-            <option value="credit">À crédit</option>
-          </select>
+            <ShoppingBag size={14} /> Achat produit
+          </button>
+          <button
+            onClick={() => setFormTab('depense')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-colors ${
+              formTab === 'depense' ? 'text-[#2D6B2D] border-b-2 border-[#2D6B2D]' : 'text-[#A09589]'
+            }`}
+          >
+            <DollarSign size={14} /> Dépense
+          </button>
         </div>
 
-        {/* Total preview */}
-        {quantite && prixUnitaire && parseFloat(quantite) > 0 && parseFloat(prixUnitaire) > 0 && (
-          <div className="flex justify-between items-center bg-[#EEF7EE] rounded-xl px-4 py-2.5">
-            <span className="text-sm text-[#78726A]">Total</span>
-            <span className="text-base font-black text-[#2D6B2D]">
-              {formatHTG(parseFloat(quantite) * parseFloat(prixUnitaire))}
-            </span>
-          </div>
-        )}
+        <div className="p-4 space-y-3">
+          {formTab === 'achat' ? (
+            <>
+              {/* Fournisseur */}
+              <select
+                value={fournisseurId}
+                onChange={e => setFournisseurId(e.target.value)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+              >
+                <option value="">Choisir un fournisseur...</option>
+                {fournisseurs.map(f => (
+                  <option key={f.id} value={f.id}>{f.nom}</option>
+                ))}
+              </select>
 
-        {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+              {/* Produit */}
+              <ProductSearch
+                produits={produits}
+                onSelect={p => p ? handleProduitChange(p.id) : (setProduitId(''), setPrixUnitaire(''))}
+                placeholder="Chercher un produit..."
+              />
 
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full flex items-center justify-center gap-2 bg-[#3DAA35] hover:bg-[#2D8B2D] disabled:opacity-50 text-[#2D6B2D] font-bold py-3.5 rounded-xl text-sm transition-colors"
-        >
-          {saving ? <Spinner size="sm" /> : <DollarSign size={16} />}
-          Enregistrer l'achat
-        </button>
+              {/* Quantité */}
+              <input
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Quantité"
+                value={quantite}
+                onChange={e => setQuantite(e.target.value)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
+              />
+
+              {/* Prix unitaire */}
+              <input
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Prix unitaire (G)"
+                value={prixUnitaire}
+                onChange={e => setPrixUnitaire(e.target.value)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
+              />
+
+              {/* Statut paiement */}
+              <select
+                value={statutPaiement}
+                onChange={e => setStatutPaiement(e.target.value as 'paye' | 'credit')}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+              >
+                <option value="paye">Payé comptant</option>
+                <option value="credit">À crédit (dû)</option>
+              </select>
+
+              {/* Total preview */}
+              {quantite && prixUnitaire && parseFloat(quantite) > 0 && parseFloat(prixUnitaire) > 0 && (
+                <div className="flex justify-between items-center bg-[#EEF7EE] rounded-xl px-4 py-2.5">
+                  <span className="text-sm text-[#78726A]">Total</span>
+                  <span className="text-base font-black text-[#2D6B2D]">
+                    {formatHTG(parseFloat(quantite) * parseFloat(prixUnitaire))}
+                  </span>
+                </div>
+              )}
+
+              {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+              <button
+                onClick={handleSaveAchat}
+                disabled={saving}
+                className="w-full flex items-center justify-center gap-2 bg-[#3DAA35] hover:bg-[#2D8B2D] disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
+              >
+                {saving ? <Spinner size="sm" /> : <DollarSign size={16} />}
+                Enregistrer l'achat
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Catégorie */}
+              <select
+                value={depCategorie}
+                onChange={e => setDepCategorie(e.target.value as DepenseCategorie)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+              >
+                {CATEGORIES_DEP.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+
+              {/* Description */}
+              <input
+                type="text"
+                placeholder="Description (ex: loyer bureau août)"
+                value={depDescription}
+                onChange={e => setDepDescription(e.target.value)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
+              />
+
+              {/* Montant */}
+              <input
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Montant (G)"
+                value={depMontant}
+                onChange={e => setDepMontant(e.target.value)}
+                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
+              />
+
+              {errorDep && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{errorDep}</p>}
+
+              <button
+                onClick={handleSaveDepense}
+                disabled={savingDep}
+                className="w-full flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
+              >
+                {savingDep ? <Spinner size="sm" /> : <DollarSign size={16} />}
+                Enregistrer la dépense
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── ACHATS RÉCENTS ───────────────────────────────────────────────── */}
@@ -265,7 +382,7 @@ export function FournisseursPage() {
           {achats.length > 5 && (
             <button
               onClick={() => setShowAll(p => !p)}
-              className="text-xs text-[#3DAA35] font-semibold flex items-center gap-1"
+              className="text-xs text-[#3DAA35] font-semibold"
             >
               {showAll ? 'Réduire' : `Voir tout (${achats.length})`}
             </button>
@@ -285,8 +402,8 @@ export function FournisseursPage() {
                   <span className="text-xs font-bold text-[#3DAA35]">{i + 1}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-[#2C2420]">
-                    Achat {a.mla_fournisseurs?.nom || '—'}
+                  <p className="text-sm font-semibold text-[#2C2420] truncate">
+                    {a.mla_fournisseurs?.nom || 'Sans fournisseur'}
                     {a.notes ? ` • ${a.notes}` : ''}
                   </p>
                   <p className="text-[11px] text-[#A09589]">{fmtDate(a.date_achat || a.created_at)}</p>
@@ -295,13 +412,23 @@ export function FournisseursPage() {
                   <span className="text-sm font-bold text-[#4A4540]">{formatHTG(a.montant_total)}</span>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     a.statut_paiement === 'paye'
-                      ? 'bg-[#3DAA35] text-[#2D6B2D]'
+                      ? 'bg-[#EEF7EE] text-[#2D6B2D]'
                       : 'bg-amber-100 text-amber-700'
                   }`}>
                     {a.statut_paiement === 'paye' ? 'Payé' : 'Crédit'}
                   </span>
+                  {a.statut_paiement === 'credit' && (
+                    <button
+                      onClick={() => handleMarkPaid(a.id)}
+                      disabled={markingPaid === a.id}
+                      className="text-[#3DAA35] hover:text-[#2D6B2D] transition-colors"
+                      title="Marquer comme payé"
+                    >
+                      {markingPaid === a.id ? <Spinner size="sm" /> : <CheckCircle size={16} />}
+                    </button>
+                  )}
                   <button
-                    onClick={() => handleDelete(a.id)}
+                    onClick={() => handleDeleteAchat(a.id)}
                     className="text-[#D4CAB8] hover:text-red-400 transition-colors"
                   >
                     <Trash2 size={14} />
@@ -354,7 +481,7 @@ export function FournisseursPage() {
                     setFormTel(f.telephone || ''); setFormEmail(f.email || '')
                     setModalOpen(true)
                   }}
-                  className="text-xs text-[#A09589] hover:text-[#4A4540] border border-[#D4CAB8] rounded-lg px-2.5 py-1.5 transition-colors"
+                  className="text-xs text-[#A09589] hover:text-[#4A4540] border border-[#D4CAB8] rounded-lg px-2.5 py-1.5 transition-colors shrink-0"
                 >
                   Modifier
                 </button>
@@ -371,25 +498,25 @@ export function FournisseursPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Nom *</label>
             <input type="text" value={formNom} onChange={e => setFormNom(e.target.value)}
-              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
+              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
               placeholder="Nom du fournisseur" autoFocus />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Contact</label>
             <input type="text" value={formContact} onChange={e => setFormContact(e.target.value)}
-              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
+              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
               placeholder="Nom du contact" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Téléphone</label>
             <input type="tel" value={formTel} onChange={e => setFormTel(e.target.value)}
-              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
+              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
               placeholder="+509 ..." />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
             <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)}
-              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
+              className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
               placeholder="email@exemple.com" />
           </div>
           <div className="flex gap-3 pt-2">

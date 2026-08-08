@@ -37,16 +37,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const adminEmail = cfgEmail?.valeur?.trim().toLowerCase() || ''
     const adminPw = cfgPw?.valeur || ''
 
-    if ((!adminEmail || trimEmail === adminEmail) && trimPw === adminPw) {
-      // Si admin_email vide → accepte n'importe quel email avec le bon mot de passe admin
-      // (permet la première connexion avant configuration)
-      if (adminEmail && trimEmail !== adminEmail) {
-        // email admin configuré mais ne correspond pas → continuer vers employés
-      } else {
+    // Si l'email correspond à l'admin → vérifier mot de passe directement
+    if (!adminEmail || trimEmail === adminEmail) {
+      if (trimPw === adminPw) {
         const s: Session = { role: 'admin' }
         setSession(s)
         localStorage.setItem('mla_session', JSON.stringify(s))
         return { ok: true }
+      }
+      // Email admin correct mais mot de passe faux → erreur immédiate (pas de fallback employé)
+      if (adminEmail && trimEmail === adminEmail) {
+        return { ok: false, error: 'Mot de passe incorrect' }
       }
     }
 

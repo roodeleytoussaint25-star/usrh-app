@@ -18,9 +18,11 @@ interface ReceiptData {
   total: number
   rabais_montant: number
   nom_client: string | null
+  telephone_client: string | null
   montant_paye: number
   created_at: string
   employe_nom: string | null
+  notes: string | null
   lignes: ReceiptLigne[]
 }
 
@@ -47,7 +49,7 @@ export function ReceiptModal({ venteId, onClose }: Props) {
     supabase
       .from('mla_ventes')
       .select(`
-        id, total, rabais_montant, nom_client, montant_paye, created_at,
+        id, total, rabais_montant, nom_client, telephone_client, notes, montant_paye, created_at,
         employe:mla_employes(nom),
         lignes:mla_ventes_lignes(quantite, prix_unitaire, sous_total, produit:mla_produits(nom))
       `)
@@ -60,6 +62,8 @@ export function ReceiptModal({ venteId, onClose }: Props) {
           total: Number(v.total),
           rabais_montant: Number(v.rabais_montant),
           nom_client: (v as Record<string, unknown>).nom_client as string | null,
+          telephone_client: (v as Record<string, unknown>).telephone_client as string | null,
+          notes: (v as Record<string, unknown>).notes as string | null,
           montant_paye: Number((v as Record<string, unknown>).montant_paye ?? v.total),
           created_at: v.created_at,
           employe_nom: (v.employe as unknown as { nom: string } | null)?.nom ?? null,
@@ -119,6 +123,7 @@ export function ReceiptModal({ venteId, onClose }: Props) {
               <p className="font-bold">Recu #: {shortRef(data.id)}</p>
               {data.employe_nom && <p>Vendeur: {data.employe_nom}</p>}
               {data.nom_client && <p>Client: <strong>{data.nom_client}</strong></p>}
+              {data.telephone_client && <p>Tel: {data.telephone_client}</p>}
 
               <p className="text-center my-2">{SEP}</p>
 
@@ -173,6 +178,12 @@ export function ReceiptModal({ venteId, onClose }: Props) {
                 </>
               )}
 
+              {data.notes && (
+                <>
+                  <p className="text-center my-2">{SEP}</p>
+                  <p className="text-[11px] italic">Note: {data.notes}</p>
+                </>
+              )}
               <p className="text-center my-2">{SEP}</p>
               <p className="text-center font-bold mb-3">Mesi pou konfyans ou !</p>
             </div>

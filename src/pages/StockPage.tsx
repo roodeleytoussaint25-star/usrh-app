@@ -76,6 +76,13 @@ export function StockPage() {
   const [formPrixLot, setFormPrixLot] = useState('')
   const [formUnitesParLot, setFormUnitesParLot] = useState('')
 
+  // Toast
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 2500)
+  }
+
   // Modal catégorie
   const [catModalOpen, setCatModalOpen] = useState(false)
   const [formCatNom, setFormCatNom] = useState('')
@@ -167,6 +174,7 @@ export function StockPage() {
     }
     setSaving(false); setModalOpen(false)
     await loadData()
+    showToast(editProduit ? 'Produit modifié ✓' : 'Produit ajouté ✓')
   }
 
   const handleToggleActif = async (p: Produit) => {
@@ -177,6 +185,7 @@ export function StockPage() {
   const handleDelete = async (id: string) => {
     await supabase.from('mla_produits').delete().eq('id', id)
     setProduits(prev => prev.filter(x => x.id !== id))
+    showToast('Produit supprimé')
   }
 
   const handleSaveCat = async () => {
@@ -208,6 +217,11 @@ export function StockPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24">
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+          {toast}
+        </div>
+      )}
 
       {/* Header */}
       <div>

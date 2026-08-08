@@ -101,7 +101,7 @@ export function ParametresPage() {
       await supabase.from('mla_config').upsert({ id: 'admin_email', valeur: adminEmail.trim().toLowerCase() })
     }
     if (newAdminPw.trim().length >= 4) {
-      await supabase.from('mla_config').update({ valeur: newAdminPw.trim() }).eq('id', 'admin_password')
+      await supabase.from('mla_config').upsert({ id: 'admin_password', valeur: newAdminPw.trim() })
     }
     setSavingAdmin(false)
     setNewAdminPw('')

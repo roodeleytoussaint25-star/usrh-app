@@ -18,6 +18,7 @@ export function CreditTab() {
   const [montantPay, setMontantPay] = useState('')
   const [notesPay, setNotesPay] = useState('')
   const [saving, setSaving] = useState(false)
+  const [soldeMsg, setSoldeMsg] = useState<string | null>(null)
 
   const loadCredits = useCallback(async () => {
     setLoading(true)
@@ -70,6 +71,10 @@ export function CreditTab() {
     setMontantPay('')
     setNotesPay('')
     setSaving(false)
+    if (statut === 'completee') {
+      setSoldeMsg('Crédit soldé ✓')
+      setTimeout(() => setSoldeMsg(null), 3000)
+    }
     await loadCredits()
   }
 
@@ -81,6 +86,11 @@ export function CreditTab() {
   if (credits.length === 0) {
     return (
       <div className="flex flex-col items-center py-14 text-center">
+        {soldeMsg && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+            {soldeMsg}
+          </div>
+        )}
         <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center mb-3">
           <CheckCircle size={24} className="text-green-500" />
         </div>
@@ -94,6 +104,11 @@ export function CreditTab() {
 
   return (
     <div className="space-y-4">
+      {soldeMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+          {soldeMsg}
+        </div>
+      )}
       {/* Banner total dû */}
       <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
         <div className="flex items-center gap-2">

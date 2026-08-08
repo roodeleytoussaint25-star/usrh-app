@@ -65,12 +65,16 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     const debutMois = new Date()
     debutMois.setDate(1)
     debutMois.setHours(0, 0, 0, 0)
-    const { data: depMois } = await supabase
-      .from('mla_depenses')
-      .select('montant')
-      .gte('date_depense', debutMois.toISOString().split('T')[0])
+    const debutMoisStr = debutMois.toISOString().split('T')[0]
+    const [{ data: depMois }, { data: achatsMois }] = await Promise.all([
+      supabase.from('mla_depenses').select('montant').gte('date_depense', debutMoisStr),
+      supabase.from('mla_achats').select('montant_total, statut_paiement').gte('date_achat', debutMoisStr),
+    ])
     const totalDepMois = (depMois || []).reduce((s: number, d: { montant: number }) => s + d.montant, 0)
-    setDepensesMois(totalDepMois)
+    const totalAchatsPaye = (achatsMois || [])
+      .filter((a: { statut_paiement: string }) => a.statut_paiement === 'paye')
+      .reduce((s: number, a: { montant_total: number }) => s + a.montant_total, 0)
+    setDepensesMois(totalDepMois + totalAchatsPaye)
 
     // Bénéfices jour = CA - coût d'achat des produits vendus aujourd'hui
     const venteIdsAuj = (ventesAuj || []).map((v: any) => v.id).filter(Boolean)
@@ -87,12 +91,14 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     }
     setBeneficesJour(Math.max(0, (ventesAuj || []).reduce((acc: number, v: any) => acc + (v.total || 0), 0) - coutAchat))
 
-    // Dettes restantes
-    const { data: emprunts } = await supabase
-      .from('mla_emprunts')
-      .select('montant_restant')
-      .eq('statut', 'actif')
-    setDettesRestantes((emprunts || []).reduce((s: number, e: { montant_restant: number }) => s + e.montant_restant, 0))
+    // Dettes restantes = emprunts actifs + achats fournisseurs à crédit
+    const [{ data: emprunts }, { data: achatsCredit }] = await Promise.all([
+      supabase.from('mla_emprunts').select('montant_restant').eq('statut', 'actif'),
+      supabase.from('mla_achats').select('montant_total').eq('statut_paiement', 'credit'),
+    ])
+    const totalEmprunts = (emprunts || []).reduce((s: number, e: { montant_restant: number }) => s + e.montant_restant, 0)
+    const totalAchatsCredit = (achatsCredit || []).reduce((s: number, a: { montant_total: number }) => s + a.montant_total, 0)
+    setDettesRestantes(totalEmprunts + totalAchatsCredit)
 
     const { data: allProduits } = await supabase
       .from('mla_produits')
