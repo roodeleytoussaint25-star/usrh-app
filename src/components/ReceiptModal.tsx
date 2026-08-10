@@ -112,7 +112,7 @@ export function ReceiptModal({ venteId, onClose }: Props) {
                 <p className="font-bold">MANNO LAVI AGRIKOL</p>
                 <p>Intrants Agricoles</p>
                 <p>Hinche & Saint-Raphaël, Haïti</p>
-                <p>Tel: +509 4241 6260 / 5581 0917</p>
+                <p>Tel: +509 4241 6260 / +509 4717 9799</p>
               </div>
 
               <p className="text-center text-[12px] mb-2">{SEP}</p>

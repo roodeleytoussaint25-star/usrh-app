@@ -51,7 +51,7 @@ function addFooter(doc: jsPDF) {
   doc.setTextColor('#888888')
   doc.setFontSize(7)
   doc.setFont('helvetica', 'normal')
-  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', 105, pageH - 7, { align: 'center' })
+  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / +509 4717 9799  •  emmanuelclaivil077@gmail.com', 105, pageH - 7, { align: 'center' })
 }
 
 // ── REÇU DE VENTE ─────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ export function genererProformaPDF(data: ProformaData): void {
   doc.text('MANNO LAVI AGRIKOL', L, 13)
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
-  doc.text('+509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', R, 13, { align: 'right' })
+  doc.text('+509 4241 6260 / +509 4717 9799  •  emmanuelclaivil077@gmail.com', R, 13, { align: 'right' })
 
   // Titre FACTURE PROFORMA
   doc.setTextColor(20, 20, 20)
@@ -312,7 +312,7 @@ export function genererProformaPDF(data: ProformaData): void {
   doc.setTextColor(120, 120, 120)
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'normal')
-  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', W / 2, pageH - 9, { align: 'center' })
+  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / +509 4717 9799  •  emmanuelclaivil077@gmail.com', W / 2, pageH - 9, { align: 'center' })
 
   // ── OUVRIR DANS UN NOUVEL ONGLET (compatible Android) ─────────────────
   const blobUrl = doc.output('bloburl')
