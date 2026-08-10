@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { Spinner } from './ui/Spinner'
 import { formatHTG, formatDate } from '../lib/utils'
-import { CreditCard, CheckCircle, ChevronDown, ChevronUp, Plus } from 'lucide-react'
+import { CreditCard, CheckCircle, ChevronDown, ChevronUp, Plus, Phone } from 'lucide-react'
 import type { Vente, VenteLigne, CreditPaiement } from '../types'
 
 interface VenteCredit extends Vente {
@@ -135,7 +135,18 @@ export function CreditTab() {
                       <span className="font-bold text-[#2C2420]">{v.nom_client || 'Client inconnu'}</span>
                       <span className="text-xs text-[#A09589]">{shortRef(v.id)}</span>
                     </div>
-                    <p className="text-xs text-[#A09589] mt-0.5">{formatDate(v.created_at)}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <p className="text-xs text-[#A09589]">{formatDate(v.created_at)}</p>
+                      {v.telephone_client && (
+                        <a
+                          href={`tel:${v.telephone_client}`}
+                          className="flex items-center gap-1 text-xs font-medium text-[#3DAA35] hover:text-[#2D8B2D]"
+                        >
+                          <Phone size={11} />
+                          {v.telephone_client}
+                        </a>
+                      )}
+                    </div>
 
                     {/* Barre progression */}
                     <div className="mt-2">
