@@ -4,7 +4,7 @@ import { Modal } from '../components/ui/Modal'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 import { formatHTG } from '../lib/utils'
-import { Plus, Truck, Phone, Mail, User, Building2, Trash2, DollarSign, CheckCircle, ShoppingBag } from 'lucide-react'
+import { Plus, Truck, Phone, Mail, User, Building2, Trash2, DollarSign, CheckCircle, ShoppingBag, X } from 'lucide-react'
 import { ProductSearch } from '../components/ProductSearch'
 import type { Fournisseur, Produit, DepenseCategorie } from '../types'
 
@@ -45,6 +45,11 @@ export function FournisseursPage() {
   const [formTab, setFormTab] = useState<FormTab>('achat')
   const [toast, setToast] = useState<string | null>(null)
   const [markingPaid, setMarkingPaid] = useState<string | null>(null)
+
+  // Panier achat
+  interface AchatCartItem { produitId: string; nom: string; quantite: number; prix: number }
+  const [achatCart, setAchatCart] = useState<AchatCartItem[]>([])
+  const [cartSearchKey, setCartSearchKey] = useState(0)
 
   // Formulaire achat rapide
   const [fournisseurId, setFournisseurId] = useState('')
@@ -101,49 +106,67 @@ export function FournisseursPage() {
     else setPrixUnitaire('')
   }
 
-  const handleSaveAchat = async () => {
-    if (!fournisseurId) { setError('Choisissez un fournisseur'); return }
+  const handleAjouterAuPanier = () => {
     if (!produitId) { setError('Choisissez un produit'); return }
     const qte = parseFloat(quantite)
     const prix = parseFloat(prixUnitaire)
     if (!qte || qte <= 0) { setError('Quantité invalide'); return }
     if (!prix || prix < 0) { setError('Prix invalide'); return }
+    const prod = produits.find(p => p.id === produitId)
+    if (!prod) return
+    setAchatCart(prev => {
+      const existing = prev.find(i => i.produitId === produitId)
+      if (existing) return prev.map(i => i.produitId === produitId ? { ...i, quantite: i.quantite + qte, prix } : i)
+      return [...prev, { produitId, nom: prod.nom, quantite: qte, prix }]
+    })
+    setProduitId(''); setQuantite(''); setPrixUnitaire(''); setError('')
+    setCartSearchKey(k => k + 1)
+  }
+
+  const handleSaveAchat = async () => {
+    if (!fournisseurId) { setError('Choisissez un fournisseur'); return }
+    if (achatCart.length === 0) { setError('Ajoutez au moins un produit au panier'); return }
 
     setSaving(true); setError('')
-    const total = qte * prix
-    const prod = produits.find(p => p.id === produitId)
+    const totalAchat = achatCart.reduce((a, i) => a + i.quantite * i.prix, 0)
 
     try {
       const { data: achatData, error: err } = await supabase
         .from('mla_achats')
         .insert({
           fournisseur_id: fournisseurId,
-          montant_total: total,
+          montant_total: totalAchat,
           statut_paiement: statutPaiement,
           date_achat: new Date().toISOString().split('T')[0],
-          notes: prod?.nom || null,
+          notes: achatCart.map(i => i.nom).join(', '),
         })
         .select().single()
 
       if (err || !achatData) { setError("Erreur lors de l'enregistrement"); setSaving(false); return }
 
-      await supabase.from('mla_achats_lignes').insert({
-        achat_id: achatData.id,
-        produit_id: produitId,
-        quantite: qte,
-        prix_achat: prix,
-        sous_total: total,
-      })
+      await supabase.from('mla_achats_lignes').insert(
+        achatCart.map(i => ({
+          achat_id: achatData.id,
+          produit_id: i.produitId,
+          quantite: i.quantite,
+          prix_achat: i.prix,
+          sous_total: i.quantite * i.prix,
+        }))
+      )
 
-      if (prod) {
-        await supabase.from('mla_produits')
-          .update({ quantite: prod.quantite + qte, prix_achat: prix })
-          .eq('id', produitId)
+      for (const item of achatCart) {
+        const prod = produits.find(p => p.id === item.produitId)
+        if (prod) {
+          await supabase.from('mla_produits')
+            .update({ quantite: prod.quantite + item.quantite, prix_achat: item.prix })
+            .eq('id', item.produitId)
+        }
       }
 
-      setProduitId(''); setQuantite(''); setPrixUnitaire('')
+      setAchatCart([])
+      setCartSearchKey(k => k + 1)
       await loadData()
-      showToast('Achat enregistré')
+      showToast(`Achat enregistré — ${achatCart.length} produit${achatCart.length > 1 ? 's' : ''}`)
     } catch {
       setError('Une erreur est survenue')
     } finally {
@@ -266,6 +289,7 @@ export function FournisseursPage() {
 
               {/* Produit */}
               <ProductSearch
+                key={cartSearchKey}
                 produits={produits}
                 onSelect={p => p ? handleProduitChange(p.id) : (setProduitId(''), setPrixUnitaire(''))}
                 placeholder="Chercher un produit..."
@@ -293,36 +317,89 @@ export function FournisseursPage() {
                 className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] placeholder-[#A09589]"
               />
 
-              {/* Statut paiement */}
-              <select
-                value={statutPaiement}
-                onChange={e => setStatutPaiement(e.target.value as 'paye' | 'credit')}
-                className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+              {/* Bouton ajouter au panier */}
+              <button
+                onClick={handleAjouterAuPanier}
+                disabled={!produitId}
+                className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-all ${
+                  produitId
+                    ? 'bg-[#3DAA35] text-white shadow-md hover:bg-[#2D8B2D] active:scale-95'
+                    : 'border border-dashed border-[#D4CAB8] text-[#A09589] cursor-not-allowed'
+                }`}
               >
-                <option value="paye">Payé comptant</option>
-                <option value="credit">À crédit (dû)</option>
-              </select>
+                <Plus size={16} /> Ajouter au panier
+              </button>
 
-              {/* Total preview */}
-              {quantite && prixUnitaire && parseFloat(quantite) > 0 && parseFloat(prixUnitaire) > 0 && (
-                <div className="flex justify-between items-center bg-[#EEF7EE] rounded-xl px-4 py-2.5">
-                  <span className="text-sm text-[#78726A]">Total</span>
-                  <span className="text-base font-black text-[#2D6B2D]">
-                    {formatHTG(parseFloat(quantite) * parseFloat(prixUnitaire))}
-                  </span>
+              {/* Panier */}
+              {achatCart.length > 0 && (
+                <div className="border border-[#D4CAB8] rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-[#FAF7F2] text-xs text-[#78726A] font-semibold">
+                        <th className="text-left px-3 py-2">Produit</th>
+                        <th className="text-center px-2 py-2">Qté</th>
+                        <th className="text-right px-2 py-2">Total</th>
+                        <th className="px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {achatCart.map(item => (
+                        <tr key={item.produitId} className="bg-white">
+                          <td className="px-3 py-2.5 text-[#2C2420] font-medium max-w-[110px]">
+                            <span className="block truncate">{item.nom}</span>
+                          </td>
+                          <td className="px-2 py-2.5 text-center text-[#78726A]">{item.quantite}</td>
+                          <td className="px-2 py-2.5 text-right font-semibold text-[#2C2420] whitespace-nowrap">
+                            {formatHTG(item.quantite * item.prix)}
+                          </td>
+                          <td className="px-2 py-2.5 text-center">
+                            <button
+                              onClick={() => setAchatCart(prev => prev.filter(i => i.produitId !== item.produitId))}
+                              className="text-red-400 hover:text-red-600"
+                            >
+                              <X size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-[#FAF7F2] border-t border-[#D4CAB8]">
+                        <td colSpan={2} className="px-3 py-2.5 text-sm font-bold text-[#2C2420]">TOTAL</td>
+                        <td className="px-2 py-2.5 text-right font-bold text-[#2D6B2D] whitespace-nowrap">
+                          {formatHTG(achatCart.reduce((a, i) => a + i.quantite * i.prix, 0))}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
+              )}
+
+              {/* Statut paiement — visible seulement si panier non vide */}
+              {achatCart.length > 0 && (
+                <select
+                  value={statutPaiement}
+                  onChange={e => setStatutPaiement(e.target.value as 'paye' | 'credit')}
+                  className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+                >
+                  <option value="paye">Payé comptant</option>
+                  <option value="credit">À crédit (dû)</option>
+                </select>
               )}
 
               {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
 
-              <button
-                onClick={handleSaveAchat}
-                disabled={saving}
-                className="w-full flex items-center justify-center gap-2 bg-[#3DAA35] hover:bg-[#2D8B2D] disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
-              >
-                {saving ? <Spinner size="sm" /> : <DollarSign size={16} />}
-                Enregistrer l'achat
-              </button>
+              {achatCart.length > 0 && (
+                <button
+                  onClick={handleSaveAchat}
+                  disabled={saving}
+                  className="w-full flex items-center justify-center gap-2 bg-[#1C2B6E] hover:bg-[#14204F] disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
+                >
+                  {saving ? <Spinner size="sm" /> : <DollarSign size={16} />}
+                  Enregistrer l'achat ({achatCart.length} produit{achatCart.length > 1 ? 's' : ''})
+                </button>
+              )}
             </>
           ) : (
             <>
