@@ -11,6 +11,7 @@ import type { Fournisseur, Produit, DepenseCategorie } from '../types'
 interface AchatRow {
   id: string
   montant_total: number
+  montant_paye: number
   statut_paiement: 'paye' | 'credit'
   notes: string | null
   date_achat: string
@@ -57,6 +58,7 @@ export function FournisseursPage() {
   const [quantite, setQuantite] = useState('')
   const [prixUnitaire, setPrixUnitaire] = useState('')
   const [statutPaiement, setStatutPaiement] = useState<'paye' | 'credit'>('paye')
+  const [acompteInput, setAcompteInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -129,6 +131,8 @@ export function FournisseursPage() {
 
     setSaving(true); setError('')
     const totalAchat = achatCart.reduce((a, i) => a + i.quantite * i.prix, 0)
+    const acompte = statutPaiement === 'credit' ? Math.min(parseFloat(acompteInput) || 0, totalAchat) : totalAchat
+    const statutFinal = acompte >= totalAchat ? 'paye' : statutPaiement
 
     try {
       const { data: achatData, error: err } = await supabase
@@ -136,7 +140,8 @@ export function FournisseursPage() {
         .insert({
           fournisseur_id: fournisseurId,
           montant_total: totalAchat,
-          statut_paiement: statutPaiement,
+          montant_paye: acompte,
+          statut_paiement: statutFinal,
           date_achat: new Date().toISOString().split('T')[0],
           notes: achatCart.map(i => i.nom).join(', '),
         })
@@ -165,6 +170,7 @@ export function FournisseursPage() {
 
       setAchatCart([])
       setCartSearchKey(k => k + 1)
+      setAcompteInput('')
       await loadData()
       showToast(`Achat enregistré — ${achatCart.length} produit${achatCart.length > 1 ? 's' : ''}`)
     } catch {
@@ -192,7 +198,11 @@ export function FournisseursPage() {
 
   const handleMarkPaid = async (achatId: string) => {
     setMarkingPaid(achatId)
-    await supabase.from('mla_achats').update({ statut_paiement: 'paye' }).eq('id', achatId)
+    const achat = achats.find(a => a.id === achatId)
+    await supabase.from('mla_achats').update({
+      statut_paiement: 'paye',
+      montant_paye: achat?.montant_total ?? 0,
+    }).eq('id', achatId)
     setMarkingPaid(null)
     await loadData()
     showToast('Marqué comme payé')
@@ -378,14 +388,39 @@ export function FournisseursPage() {
 
               {/* Statut paiement — visible seulement si panier non vide */}
               {achatCart.length > 0 && (
-                <select
-                  value={statutPaiement}
-                  onChange={e => setStatutPaiement(e.target.value as 'paye' | 'credit')}
-                  className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
-                >
-                  <option value="paye">Payé comptant</option>
-                  <option value="credit">À crédit (dû)</option>
-                </select>
+                <div className="space-y-2">
+                  <select
+                    value={statutPaiement}
+                    onChange={e => { setStatutPaiement(e.target.value as 'paye' | 'credit'); setAcompteInput('') }}
+                    className="w-full border border-[#D4CAB8] rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white text-[#4A4540]"
+                  >
+                    <option value="paye">Payé comptant</option>
+                    <option value="credit">À crédit</option>
+                  </select>
+                  {statutPaiement === 'credit' && (
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="Acompte versé (0 si rien payé)"
+                      value={acompteInput}
+                      onChange={e => setAcompteInput(e.target.value)}
+                      className="w-full border border-amber-300 bg-amber-50 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder-amber-400"
+                    />
+                  )}
+                  {statutPaiement === 'credit' && achatCart.length > 0 && (
+                    <div className="flex justify-between text-xs px-1">
+                      <span className="text-[#78726A]">Reste dû :</span>
+                      <span className="font-bold text-amber-600">
+                        {(() => {
+                          const total = achatCart.reduce((a, i) => a + i.quantite * i.prix, 0)
+                          const acompte = Math.min(parseFloat(acompteInput) || 0, total)
+                          return (total - acompte).toLocaleString('fr-FR') + ' G'
+                        })()}
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
 
               {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
@@ -486,7 +521,12 @@ export function FournisseursPage() {
                   <p className="text-[11px] text-[#A09589]">{fmtDate(a.date_achat || a.created_at)}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-bold text-[#4A4540]">{formatHTG(a.montant_total)}</span>
+                  <div className="text-right">
+                    <span className="text-sm font-bold text-[#4A4540] block">{formatHTG(a.montant_total)}</span>
+                    {a.statut_paiement === 'credit' && a.montant_paye > 0 && (
+                      <span className="text-[10px] text-amber-600">reste {formatHTG(a.montant_total - a.montant_paye)}</span>
+                    )}
+                  </div>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     a.statut_paiement === 'paye'
                       ? 'bg-[#EEF7EE] text-[#2D6B2D]'
