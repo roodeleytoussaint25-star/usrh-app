@@ -192,7 +192,26 @@ export function StockPage() {
     if (!formCatNom.trim()) return
     setSavingCat(true)
     await supabase.from('mla_categories').insert({ nom: formCatNom.trim() })
-    setSavingCat(false); setCatModalOpen(false); setFormCatNom('')
+    setSavingCat(false); setFormCatNom('')
+    await loadData()
+  }
+
+  const [deletingCatId, setDeletingCatId] = useState<string | null>(null)
+  const [catDeleteError, setCatDeleteError] = useState('')
+
+  const handleDeleteCat = async (id: string) => {
+    setCatDeleteError('')
+    const { count } = await supabase
+      .from('mla_produits')
+      .select('id', { count: 'exact', head: true })
+      .eq('categorie_id', id)
+    if ((count ?? 0) > 0) {
+      setCatDeleteError('Impossible : des produits utilisent cette catégorie.')
+      return
+    }
+    setDeletingCatId(id)
+    await supabase.from('mla_categories').delete().eq('id', id)
+    setDeletingCatId(null)
     await loadData()
   }
 
@@ -654,20 +673,40 @@ export function StockPage() {
       </Modal>
 
       {/* ── MODAL CATÉGORIE ─────────────────────────────────────────────────── */}
-      <Modal open={catModalOpen} onClose={() => setCatModalOpen(false)} title="Nouvelle catégorie">
+      <Modal open={catModalOpen} onClose={() => { setCatModalOpen(false); setCatDeleteError('') }} title="Catégories">
         <div className="space-y-4">
+          {/* Liste existantes */}
+          {categories.length > 0 && (
+            <div className="border border-[#D4CAB8] rounded-xl overflow-hidden">
+              {categories.map(c => (
+                <div key={c.id} className="flex items-center justify-between px-3 py-2.5 border-b border-[#F0EBE0] last:border-0">
+                  <span className="text-sm text-[#2C2420] font-medium">{c.nom}</span>
+                  <button
+                    onClick={() => handleDeleteCat(c.id)}
+                    disabled={deletingCatId === c.id}
+                    className="text-[#D4CAB8] hover:text-red-500 transition-colors p-1"
+                  >
+                    {deletingCatId === c.id ? <Spinner size="sm" /> : <Trash2 size={15} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {catDeleteError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{catDeleteError}</p>
+          )}
+          {/* Ajouter */}
           <div>
-            <label className="block text-sm font-semibold text-[#4A4540] mb-2">Nom *</label>
+            <label className="block text-sm font-semibold text-[#4A4540] mb-2">Nouvelle catégorie</label>
             <input type="text" value={formCatNom}
               onChange={e => setFormCatNom(e.target.value)}
               className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
               placeholder="Ex: Engrais, Pesticides, Semences..."
-              autoFocus
               onKeyDown={e => e.key === 'Enter' && handleSaveCat()}
             />
           </div>
           <div className="flex gap-3">
-            <Button variant="ghost" fullWidth onClick={() => setCatModalOpen(false)}>Annuler</Button>
+            <Button variant="ghost" fullWidth onClick={() => { setCatModalOpen(false); setCatDeleteError('') }}>Fermer</Button>
             <Button variant="primary" fullWidth loading={savingCat} onClick={handleSaveCat}>Créer</Button>
           </div>
         </div>
