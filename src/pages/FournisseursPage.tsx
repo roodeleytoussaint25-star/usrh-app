@@ -46,6 +46,9 @@ export function FournisseursPage() {
   const [formTab, setFormTab] = useState<FormTab>('achat')
   const [toast, setToast] = useState<string | null>(null)
   const [markingPaid, setMarkingPaid] = useState<string | null>(null)
+  const [versementId, setVersementId] = useState<string | null>(null)
+  const [versementInput, setVersementInput] = useState('')
+  const [savingVersement, setSavingVersement] = useState(false)
 
   // Panier achat
   interface AchatCartItem { produitId: string; nom: string; quantite: number; prix: number }
@@ -194,6 +197,20 @@ export function FournisseursPage() {
     if (err) { setErrorDep('Erreur lors de l\'enregistrement'); return }
     setDepDescription(''); setDepMontant('')
     showToast('Dépense enregistrée')
+  }
+
+  const handleVersement = async (achat: AchatRow) => {
+    const montant = parseFloat(versementInput)
+    if (!montant || montant <= 0) return
+    setSavingVersement(true)
+    const nouveauPaye = Math.min(achat.montant_paye + montant, achat.montant_total)
+    const statut = nouveauPaye >= achat.montant_total ? 'paye' : 'credit'
+    await supabase.from('mla_achats').update({ montant_paye: nouveauPaye, statut_paiement: statut }).eq('id', achat.id)
+    setSavingVersement(false)
+    setVersementId(null)
+    setVersementInput('')
+    await loadData()
+    showToast(statut === 'paye' ? 'Achat soldé ✓' : 'Versement enregistré')
   }
 
   const handleMarkPaid = async (achatId: string) => {
@@ -509,48 +526,83 @@ export function FournisseursPage() {
         ) : (
           <div className="divide-y divide-slate-50">
             {visibleAchats.map((a, i) => (
-              <div key={a.id} className="flex items-center gap-3 px-4 py-3.5">
-                <div className="w-7 h-7 rounded-full bg-[#EEF7EE] flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-[#3DAA35]">{i + 1}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-[#2C2420] truncate">
-                    {a.mla_fournisseurs?.nom || 'Sans fournisseur'}
-                    {a.notes ? ` • ${a.notes}` : ''}
-                  </p>
-                  <p className="text-[11px] text-[#A09589]">{fmtDate(a.date_achat || a.created_at)}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="text-right">
-                    <span className="text-sm font-bold text-[#4A4540] block">{formatHTG(a.montant_total)}</span>
-                    {a.statut_paiement === 'credit' && a.montant_paye > 0 && (
-                      <span className="text-[10px] text-amber-600">reste {formatHTG(a.montant_total - a.montant_paye)}</span>
+              <div key={a.id}>
+                <div className="flex items-center gap-3 px-4 py-3.5">
+                  <div className="w-7 h-7 rounded-full bg-[#EEF7EE] flex items-center justify-center shrink-0">
+                    <span className="text-xs font-bold text-[#3DAA35]">{i + 1}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[#2C2420] truncate">
+                      {a.mla_fournisseurs?.nom || 'Sans fournisseur'}
+                      {a.notes ? ` • ${a.notes}` : ''}
+                    </p>
+                    <p className="text-[11px] text-[#A09589]">{fmtDate(a.date_achat || a.created_at)}</p>
+                    {a.statut_paiement === 'credit' && (
+                      <div className="flex gap-3 text-[11px] mt-0.5">
+                        <span className="text-[#78726A]">Payé : <span className="font-semibold text-[#2D6B2D]">{formatHTG(a.montant_paye)}</span></span>
+                        <span className="text-amber-600 font-semibold">Reste : {formatHTG(a.montant_total - a.montant_paye)}</span>
+                      </div>
                     )}
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    a.statut_paiement === 'paye'
-                      ? 'bg-[#EEF7EE] text-[#2D6B2D]'
-                      : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {a.statut_paiement === 'paye' ? 'Payé' : 'Crédit'}
-                  </span>
-                  {a.statut_paiement === 'credit' && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-bold text-[#4A4540]">{formatHTG(a.montant_total)}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      a.statut_paiement === 'paye'
+                        ? 'bg-[#EEF7EE] text-[#2D6B2D]'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {a.statut_paiement === 'paye' ? 'Payé' : 'Crédit'}
+                    </span>
+                    {a.statut_paiement === 'credit' && (
+                      <button
+                        onClick={() => { setVersementId(versementId === a.id ? null : a.id); setVersementInput('') }}
+                        className="text-amber-500 hover:text-amber-700 transition-colors"
+                        title="Enregistrer un versement"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleMarkPaid(a.id)}
-                      disabled={markingPaid === a.id}
-                      className="text-[#3DAA35] hover:text-[#2D6B2D] transition-colors"
-                      title="Marquer comme payé"
+                      onClick={() => handleDeleteAchat(a.id)}
+                      className="text-[#D4CAB8] hover:text-red-400 transition-colors"
                     >
-                      {markingPaid === a.id ? <Spinner size="sm" /> : <CheckCircle size={16} />}
+                      <Trash2 size={14} />
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleDeleteAchat(a.id)}
-                    className="text-[#D4CAB8] hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  </div>
                 </div>
+
+                {/* Formulaire versement inline */}
+                {versementId === a.id && (
+                  <div className="px-4 pb-3 pt-0 bg-amber-50 border-t border-amber-100 space-y-2">
+                    <p className="text-xs font-semibold text-amber-700">Versement au fournisseur</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max={a.montant_total - a.montant_paye}
+                        placeholder={`Max ${formatHTG(a.montant_total - a.montant_paye)}`}
+                        value={versementInput}
+                        onChange={e => setVersementInput(e.target.value)}
+                        autoFocus
+                        className="flex-1 border border-amber-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                      <button
+                        onClick={() => { setVersementId(null); setVersementInput('') }}
+                        className="px-3 py-2 border border-[#D4CAB8] rounded-lg text-sm text-[#78726A] hover:bg-[#FAF7F2]"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        onClick={() => handleVersement(a)}
+                        disabled={savingVersement || !versementInput}
+                        className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {savingVersement ? <Spinner size="sm" /> : <CheckCircle size={14} />}
+                        OK
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
