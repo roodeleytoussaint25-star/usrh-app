@@ -393,22 +393,31 @@ export function StockPage() {
                     </div>
 
                     {/* Action row */}
-                    {isAdmin && (
-                      <div className="flex items-center border-t border-[#E8E0D0] px-3 py-2 gap-2">
+                    <div className="flex items-center border-t border-[#E8E0D0] px-3 py-2 gap-2">
+                      {isAdmin && (
                         <button
                           onClick={() => openEdit(p)}
                           className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-semibold text-[#2D6B2D] bg-[#EEF7EE] rounded-xl hover:bg-[#D6EED6] transition-colors"
                         >
                           <Pencil size={14} /> Modifier
                         </button>
+                      )}
+                      <button
+                        onClick={() => { setEntreeModal(p); setEntreeQte('') }}
+                        className={`${isAdmin ? 'w-11 h-11' : 'flex-1 py-3 gap-1.5 text-sm font-semibold'} flex items-center justify-center rounded-xl bg-[#EAF4FF] text-[#1C2B6E] hover:bg-[#C7DEFF] transition-colors`}
+                      >
+                        <PackagePlus size={isAdmin ? 16 : 14} />
+                        {!isAdmin && <span>+ Entrée stock</span>}
+                      </button>
+                      {isAdmin && (
                         <button
                           onClick={() => handleDelete(p.id)}
                           className="w-11 h-11 flex items-center justify-center rounded-xl bg-[#FEF2F2] text-red-300 hover:text-red-500 hover:bg-red-100 transition-colors"
                         >
                           <Trash2 size={16} />
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -623,6 +632,9 @@ export function StockPage() {
               className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white">
               <option value="unité">Unité</option>
               <option value="sac">Sac</option>
+              <option value="caisse">Caisse</option>
+              <option value="sachet">Sachet</option>
+              <option value="Mamit">Mamit</option>
               <option value="kg">Kg</option>
               <option value="lbs">Lbs</option>
               <option value="litre">Litre</option>

@@ -51,7 +51,7 @@ function addFooter(doc: jsPDF) {
   doc.setTextColor('#888888')
   doc.setFontSize(7)
   doc.setFont('helvetica', 'normal')
-  doc.text('Manno Lavi Agrikol • Hinche, Haïti • +509 47 59 6225', 105, pageH - 7, { align: 'center' })
+  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', 105, pageH - 7, { align: 'center' })
 }
 
 // ── REÇU DE VENTE ─────────────────────────────────────────────────────────────
@@ -59,7 +59,6 @@ function addFooter(doc: jsPDF) {
 export interface ReceiptData {
   id: string
   total: number
-  rabais_montant: number
   nom_client?: string | null
   montant_paye: number
   created_at: string
@@ -107,18 +106,7 @@ export function genererRecuPDF(data: ReceiptData): void {
   const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4
 
   // Totaux
-  if (data.rabais_montant > 0) {
-    const sousTotal = data.lignes.reduce((a, l) => a + l.sous_total, 0)
-    doc.setFontSize(8)
-    doc.setTextColor('#444444')
-    doc.text('Sous-total :', 130, finalY)
-    doc.text(fmtG(sousTotal), 196, finalY, { align: 'right' })
-    doc.text('Rabais :', 130, finalY + 5)
-    doc.setTextColor('#DC2626')
-    doc.text(`- ${fmtG(data.rabais_montant)}`, 196, finalY + 5, { align: 'right' })
-  }
-
-  const totalY = data.rabais_montant > 0 ? finalY + 12 : finalY
+  const totalY = finalY
   doc.setFillColor(NAVY)
   doc.roundedRect(14, totalY - 4, 182, 10, 2, 2, 'F')
   doc.setTextColor('#FFFFFF')
@@ -191,7 +179,7 @@ export function genererProformaPDF(data: ProformaData): void {
   doc.text('MANNO LAVI AGRIKOL', L, 13)
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
-  doc.text('Intrants Agricoles  •  Hinche & Saint-Raphaël  •  +509 47 59 6225', R, 13, { align: 'right' })
+  doc.text('+509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', R, 13, { align: 'right' })
 
   // Titre FACTURE PROFORMA
   doc.setTextColor(20, 20, 20)
@@ -324,7 +312,7 @@ export function genererProformaPDF(data: ProformaData): void {
   doc.setTextColor(120, 120, 120)
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'normal')
-  doc.text('Manno Lavi Agrikol  •  Hinche, Haïti  •  +509 47 59 6225', W / 2, pageH - 9, { align: 'center' })
+  doc.text('Manno Lavi Agrikol  •  +509 4241 6260 / 5581 0917  •  emmanuelclaivil077@gmail.com', W / 2, pageH - 9, { align: 'center' })
 
   // ── OUVRIR DANS UN NOUVEL ONGLET (compatible Android) ─────────────────
   const blobUrl = doc.output('bloburl')

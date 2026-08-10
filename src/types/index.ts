@@ -58,7 +58,6 @@ export interface VenteLigne {
 }
 
 export type VenteStatut = 'completee' | 'annulee' | 'retour' | 'credit'
-export type RabaisType = 'montant' | 'pourcentage'
 
 export interface Vente {
   id: string
@@ -67,8 +66,6 @@ export interface Vente {
   succursale_id: string
   succursale?: { nom: string }
   total: number
-  rabais_montant: number
-  rabais_type: RabaisType
   statut: VenteStatut
   notes?: string
   nom_client?: string

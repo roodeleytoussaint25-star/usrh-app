@@ -16,7 +16,6 @@ interface ReceiptLigne {
 interface ReceiptData {
   id: string
   total: number
-  rabais_montant: number
   nom_client: string | null
   telephone_client: string | null
   montant_paye: number
@@ -49,7 +48,7 @@ export function ReceiptModal({ venteId, onClose }: Props) {
     supabase
       .from('mla_ventes')
       .select(`
-        id, total, rabais_montant, nom_client, telephone_client, notes, montant_paye, created_at,
+        id, total, nom_client, telephone_client, notes, montant_paye, created_at,
         employe:mla_employes(nom),
         lignes:mla_ventes_lignes(quantite, prix_unitaire, sous_total, produit:mla_produits(nom))
       `)
@@ -60,7 +59,6 @@ export function ReceiptModal({ venteId, onClose }: Props) {
         setData({
           id: v.id,
           total: Number(v.total),
-          rabais_montant: Number(v.rabais_montant),
           nom_client: (v as Record<string, unknown>).nom_client as string | null,
           telephone_client: (v as Record<string, unknown>).telephone_client as string | null,
           notes: (v as Record<string, unknown>).notes as string | null,
@@ -114,7 +112,7 @@ export function ReceiptModal({ venteId, onClose }: Props) {
                 <p className="font-bold">MANNO LAVI AGRIKOL</p>
                 <p>Intrants Agricoles</p>
                 <p>Hinche & Saint-Raphaël, Haïti</p>
-                <p>Tel: +509 47 59 6225</p>
+                <p>Tel: +509 4241 6260 / 5581 0917</p>
               </div>
 
               <p className="text-center text-[12px] mb-2">{SEP}</p>
@@ -146,19 +144,6 @@ export function ReceiptModal({ venteId, onClose }: Props) {
               ))}
 
               <p className="text-center my-2">{SEP}</p>
-
-              {data.rabais_montant > 0 && (
-                <>
-                  <div className="flex justify-between">
-                    <span>Sous-total:</span>
-                    <span>{formatG(data.lignes.reduce((a, l) => a + l.sous_total, 0))}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Rabais:</span>
-                    <span>-{formatG(data.rabais_montant)}</span>
-                  </div>
-                </>
-              )}
 
               <div className="flex justify-between items-baseline mt-1">
                 <span className="text-[17px] font-black">TOTAL:</span>

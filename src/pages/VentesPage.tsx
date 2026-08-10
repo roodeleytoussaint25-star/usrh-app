@@ -12,7 +12,7 @@ import { CreditTab } from '../components/CreditTab'
 import { ProductSearch } from '../components/ProductSearch'
 import { genererProformaPDF } from '../lib/pdf'
 import type { ProformaData } from '../lib/pdf'
-import type { Produit, Vente, VenteLigne, RabaisType, VenteStatut } from '../types'
+import type { Produit, Vente, VenteLigne, VenteStatut } from '../types'
 
 type Tab = 'vente' | 'credits'
 
@@ -58,11 +58,6 @@ export function VentesPage() {
   const [selectedId, setSelectedId]   = useState('')
   const [qte, setQte]                 = useState(1)
   const [prixUnit, setPrixUnit]       = useState(0)
-
-  // Rabais
-  const [rabaisActif, setRabaisActif]   = useState(false)
-  const [rabaisType, setRabaisType]     = useState<RabaisType>('montant')
-  const [rabaisValeur, setRabaisValeur] = useState('')
 
   // Panier — clé pour reset le champ search après ajout
   const [searchKey, setSearchKey] = useState(0)
@@ -171,13 +166,7 @@ export function VentesPage() {
   const sousTotal  = cart.reduce((acc, i) => acc + i.quantite * i.prix_unitaire, 0)
   const nbArticles = cart.reduce((acc, i) => acc + i.quantite, 0)
 
-  const calcRabais = (): number => {
-    const val = parseFloat(rabaisValeur) || 0
-    if (!rabaisActif || val <= 0) return 0
-    return rabaisType === 'montant' ? Math.min(val, sousTotal) : Math.min((sousTotal * val) / 100, sousTotal)
-  }
-
-  const total = sousTotal - calcRabais()
+  const total = sousTotal
 
   const montantPayeCalc = paiementPartiel
     ? Math.min(parseFloat(montantPayeInput) || 0, total)
@@ -189,7 +178,6 @@ export function VentesPage() {
 
   const resetCart = () => {
     setCart([])
-    setRabaisActif(false); setRabaisValeur('')
     setNomClient(''); setTelephoneClient(''); setNotesVente('')
     setPaiementPartiel(false); setMontantPayeInput(''); setModePaiement('especes')
     setProformaMode(false); setProformaContact(''); setProformaValidite('30')
@@ -231,8 +219,6 @@ export function VentesPage() {
           employe_id: session?.employeId || null,
           succursale_id: session?.succursaleId || null,
           total,
-          rabais_montant: calcRabais(),
-          rabais_type: rabaisType,
           statut,
           nom_client: nomClient.trim() || null,
           telephone_client: telephoneClient.trim() || null,
@@ -473,37 +459,6 @@ export function VentesPage() {
                       </tr>
                     </tfoot>
                   </table>
-                </div>
-              )}
-
-              {/* Rabais */}
-              {cart.length > 0 && (
-                <div className="mt-3">
-                  <button
-                    onClick={() => setRabaisActif(p => !p)}
-                    className="text-xs text-[#A09589] hover:text-[#78726A] flex items-center gap-1"
-                  >
-                    <Plus size={11} /> {rabaisActif ? 'Retirer le rabais' : 'Ajouter un rabais'}
-                  </button>
-                  {rabaisActif && (
-                    <div className="flex gap-2 items-center mt-2">
-                      <select value={rabaisType} onChange={e => setRabaisType(e.target.value as RabaisType)}
-                        className="border border-[#D4CAB8] rounded-lg px-2 py-1.5 text-sm">
-                        <option value="montant">HTG</option>
-                        <option value="pourcentage">%</option>
-                      </select>
-                      <input type="number" min="0" value={rabaisValeur}
-                        onChange={e => setRabaisValeur(e.target.value)}
-                        className="flex-1 border border-[#D4CAB8] rounded-lg px-3 py-1.5 text-sm"
-                        placeholder={rabaisType === 'pourcentage' ? 'Ex: 10' : 'Ex: 50'}
-                      />
-                      {calcRabais() > 0 && (
-                        <span className="text-xs font-semibold text-red-500 whitespace-nowrap">
-                          -{formatHTG(calcRabais())}
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -805,12 +760,6 @@ export function VentesPage() {
                             </div>
                           )) : (
                             <div className="flex justify-center py-2"><Spinner size="sm" /></div>
-                          )}
-                          {v.rabais_montant > 0 && (
-                            <div className="flex justify-between text-sm font-semibold pt-1 border-t border-[#D4CAB8]">
-                              <span className="text-[#78726A]">Rabais</span>
-                              <span className="text-red-500">-{formatHTG(v.rabais_montant)}</span>
-                            </div>
                           )}
                           {v.statut === 'completee' && session?.role === 'admin' && (
                             <button
