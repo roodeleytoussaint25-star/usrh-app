@@ -61,6 +61,7 @@ export function VentesPage() {
 
   // Panier — clé pour reset le champ search après ajout
   const [searchKey, setSearchKey] = useState(0)
+  const [ajoutMsg, setAjoutMsg] = useState(false)
 
   // Client + paiement
   const [nomClient, setNomClient]               = useState('')
@@ -144,6 +145,8 @@ export function VentesPage() {
     })
     setSelectedId(''); setQte(1); setPrixUnit(0); setError('')
     setSearchKey(k => k + 1)
+    setAjoutMsg(true)
+    setTimeout(() => setAjoutMsg(false), 1800)
   }
 
   const removeFromCart = (produitId: string) =>
@@ -291,6 +294,12 @@ export function VentesPage() {
     <>
       <ReceiptModal venteId={receiptVenteId} onClose={() => setReceiptVenteId(null)} />
 
+      {ajoutMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-xl whitespace-nowrap flex items-center gap-2">
+          <ShoppingCart size={14} /> Ajouté au panier
+        </div>
+      )}
+
       <div className="p-4 space-y-4 pb-24">
         {/* ── HEADER ────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between pt-1">
@@ -396,7 +405,11 @@ export function VentesPage() {
                 <button
                   onClick={handleAjouter}
                   disabled={!selectedId}
-                  className="w-full flex items-center justify-center gap-2 border border-dashed border-[#3DAA35] text-[#3DAA35] rounded-lg py-2.5 text-sm font-semibold hover:bg-[#EEF7EE] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-all ${
+                    selectedId
+                      ? 'bg-[#3DAA35] text-white shadow-md hover:bg-[#2D8B2D] active:scale-95'
+                      : 'border border-dashed border-[#D4CAB8] text-[#A09589] cursor-not-allowed'
+                  }`}
                 >
                   <Plus size={16} /> Ajouter au panier
                 </button>
