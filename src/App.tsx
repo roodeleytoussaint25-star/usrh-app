@@ -1,66 +1,73 @@
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ToastProvider } from './contexts/ToastContext'
 import { AppShell } from './components/app-shell'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { VentesPage } from './pages/VentesPage'
 import { StockPage } from './pages/StockPage'
-import { FournisseursPage } from './pages/FournisseursPage'
+import { EtudiantsPage } from './pages/EtudiantsPage'
 import { RapportsPage } from './pages/RapportsPage'
 import { ParametresPage } from './pages/ParametresPage'
 import { Spinner } from './components/ui/Spinner'
 
-export type Page = 'dashboard' | 'ventes' | 'stock' | 'fournisseurs' | 'rapports' | 'parametres'
+export type Page = 'dashboard' | 'etudiants' | 'ventes' | 'stock' | 'rapports' | 'parametres'
 
 const pageTitles: Record<Page, string> = {
-  dashboard: 'Tableau de bord',
+  dashboard: 'Vue Globale',
+  etudiants: 'Cours & Étudiants',
   ventes: 'Ventes',
   stock: 'Stock',
-  fournisseurs: 'Achats',
   rapports: 'Rapports',
   parametres: 'Paramètres',
 }
 
+function SuspendedScreen() {
+  return (
+    <div className="min-h-screen bg-[#1B2A8A] flex flex-col items-center justify-center text-white px-6 text-center">
+      <div className="text-5xl mb-4">🔒</div>
+      <h1 className="text-2xl font-bold mb-2">Accès suspendu</h1>
+      <p className="text-white/70">Contactez Mèt Biznis au +509 56173528</p>
+    </div>
+  )
+}
+
 function AppContent() {
-  const { session, loading } = useAuth()
+  const { session, loading, appActive } = useAuth()
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const [ventesPreselect, setVentesPreselect] = useState<number | null>(null)
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F5F0E8] flex items-center justify-center">
+      <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center">
         <Spinner size="lg" />
       </div>
     )
   }
 
-  if (!session) {
-    return <LoginPage onLogin={() => setCurrentPage('dashboard')} />
-  }
+  if (!appActive) return <SuspendedScreen />
+  if (!session) return <LoginPage onLogin={() => setCurrentPage('dashboard')} />
 
-  const allowedPages: Page[] = session.role === 'admin'
-    ? ['dashboard', 'ventes', 'stock', 'fournisseurs', 'rapports', 'parametres']
-    : ['ventes', 'stock']
+  const adminPages: Page[] = ['dashboard', 'etudiants', 'ventes', 'stock', 'rapports', 'parametres']
+  const employePages: Page[] = ['etudiants', 'ventes', 'stock']
+  const allowedPages = session.role === 'admin' ? adminPages : employePages
 
-  const effectivePage: Page = session.role === 'employe' && currentPage === 'dashboard'
-    ? 'ventes'
-    : allowedPages.includes(currentPage)
-      ? currentPage
-      : allowedPages[0]
+  const effectivePage: Page = allowedPages.includes(currentPage)
+    ? currentPage
+    : allowedPages[0]
 
   const handleNavigate = (page: Page) => {
-    if (allowedPages.includes(page)) {
-      setCurrentPage(page)
-    }
+    if (allowedPages.includes(page)) setCurrentPage(page)
   }
 
   const renderPage = () => {
     switch (effectivePage) {
-      case 'dashboard':   return <DashboardPage onNavigate={handleNavigate} />
-      case 'ventes':      return <VentesPage />
-      case 'stock':       return <StockPage />
-      case 'fournisseurs': return <FournisseursPage />
-      case 'rapports':    return <RapportsPage />
-      case 'parametres':  return <ParametresPage />
+      case 'dashboard':  return <DashboardPage onNavigate={handleNavigate} />
+      case 'etudiants':  return <EtudiantsPage onPayEtudiant={(id) => { setVentesPreselect(id); handleNavigate('ventes') }} />
+      case 'ventes':     return <VentesPage preselectStudentId={ventesPreselect} onMounted={() => setVentesPreselect(null)} />
+      case 'stock':      return <StockPage />
+      case 'rapports':   return <RapportsPage onPayEtudiant={(id) => { setVentesPreselect(id); handleNavigate('ventes') }} />
+      case 'parametres': return <ParametresPage />
     }
   }
 
@@ -74,7 +81,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </AuthProvider>
   )
 }

@@ -1,799 +1,771 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
-import { Card } from '../components/ui/Card'
-import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
-import { Spinner } from '../components/ui/Spinner'
-import { formatHTG, formatTime, formatDate, todayStart } from '../lib/utils'
-import { Plus, Trash2, RotateCcw, ShoppingCart, Receipt, CreditCard, FileText, X, MapPin, Search } from 'lucide-react'
-import { useAuth } from '../contexts/AuthContext'
-import { ReceiptModal } from '../components/ReceiptModal'
-import { CreditTab } from '../components/CreditTab'
-import { ProductSearch } from '../components/ProductSearch'
-import { genererProformaPDF } from '../lib/pdf'
-import type { ProformaData } from '../lib/pdf'
-import type { Produit, Vente, VenteLigne, VenteStatut } from '../types'
+import { supabase } from '@/lib/supabase'
+import { Plus, Minus, Trash2, ShoppingBag, GraduationCap, Check, Search, X, CreditCard, ChevronRight, Printer, AlertCircle } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/contexts/ToastContext'
+import { ReceiptModal } from '@/components/ReceiptModal'
+import type { RecuDirectData } from '@/components/ReceiptModal'
+import type { Article, VenteLigne, TypeFrais } from '@/types'
 
-type Tab = 'vente' | 'credits'
+type Mode = 'frais' | 'produit' | 'credits'
 
-function proformaNumero() {
-  const d = new Date()
-  return `PRO-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`
-}
-function proformaDateFR() {
-  const d = new Date()
-  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+
+interface CreditVente {
+  id: number
+  total: number
+  montant_paye: number
+  created_at: string
+  etudiant_nom: string | null
+  articles: string
 }
 
-interface CartItem {
-  produit: Produit
-  quantite: number
-  prix_unitaire: number
+interface Props {
+  preselectStudentId: number | null
+  onMounted: () => void
 }
 
-interface VenteExpanded extends Vente {
-  expanded?: boolean
-  lignes?: VenteLigne[]
+const FRAIS_CONFIG = [
+  { type: 'inscription'  as TypeFrais, label: 'Inscription',  fieldTotal: 'frais_inscription',  fieldPaye: 'frais_inscription_paye'  },
+  { type: 'formation_v1' as TypeFrais, label: 'Formation V1', fieldTotal: 'frais_formation_v1', fieldPaye: 'frais_formation_v1_paye' },
+  { type: 'formation_v2' as TypeFrais, label: 'Formation V2', fieldTotal: 'frais_formation_v2', fieldPaye: 'frais_formation_v2_paye' },
+]
+
+const fmt = (n: number) => Math.round(n).toString() + ' HTG'
+const shortRef = (id: number) => 'RE-' + String(id).padStart(6, '0')
+const TYPE_FRAIS_LABEL: Record<string, string> = { inscription: 'Inscription', formation_v1: 'Formation V1', formation_v2: 'Formation V2' }
+
+interface EtudiantSearchProps {
+  searchText: string
+  selectedId: number | null
+  suggestions: { id: number; nom: string }[]
+  showSuggestions: boolean
+  placeholder: string
+  onChangeText: (v: string) => void
+  onFocus: () => void
+  onBlur: () => void
+  onSelect: (e: { id: number; nom: string }) => void
+  onClear: () => void
 }
 
-
-const STATUT_BADGE: Record<VenteStatut, { label: string; color: string }> = {
-  completee: { label: 'Payé',    color: 'bg-green-100 text-green-700' },
-  annulee:   { label: 'Annulé',  color: 'bg-red-100 text-red-600'    },
-  retour:    { label: 'Retour',  color: 'bg-yellow-100 text-yellow-700' },
-  credit:    { label: 'Crédit',  color: 'bg-amber-100 text-amber-700' },
-}
-
-export function VentesPage() {
-  const { session } = useAuth()
-  const [activeTab, setActiveTab] = useState<Tab>('vente')
-  const [produits, setProduits]     = useState<Produit[]>([])
-  const [cart, setCart]             = useState<CartItem[]>([])
-  const [historique, setHistorique] = useState<VenteExpanded[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [saving, setSaving]         = useState(false)
-  const [error, setError]           = useState('')
-
-  // Formulaire produit
-  const [selectedId, setSelectedId]   = useState('')
-  const [qte, setQte]                 = useState(1)
-  const [prixUnit, setPrixUnit]       = useState(0)
-
-  // Panier — clé pour reset le champ search après ajout
-  const [searchKey, setSearchKey] = useState(0)
-  const [ajoutMsg, setAjoutMsg] = useState(false)
-
-  // Client + paiement
-  const [nomClient, setNomClient]               = useState('')
-  const [telephoneClient, setTelephoneClient]   = useState('')
-  const [notesVente, setNotesVente]             = useState('')
-  const [paiementPartiel, setPaiementPartiel]   = useState(false)
-  const [montantPayeInput, setMontantPayeInput] = useState('')
-  const [modePaiement, setModePaiement]         = useState('especes')
-
-  // Proforma (mode overlay)
-  const [proformaMode, setProformaMode]       = useState(false)
-  const [proformaContact, setProformaContact] = useState('')
-  const [proformaValidite, setProformaValidite] = useState('30')
-
-  // Recherche historique
-  const [searchHisto, setSearchHisto] = useState('')
-  const [dateHisto, setDateHisto]     = useState('')
-
-  // Modals
-  const [receiptVenteId, setReceiptVenteId] = useState<string | null>(null)
-  const [creditsBadge, setCreditsBadge]     = useState(0)
-
-  useEffect(() => { loadData() }, [])
-  useEffect(() => { loadVentes(dateHisto) }, [dateHisto])
-
-  const loadData = async () => {
-    setLoading(true)
-    const [{ data: prods }, { data: creditsCount }] = await Promise.all([
-      supabase.from('mla_produits').select('*').eq('actif', true).order('nom'),
-      supabase.from('mla_ventes').select('id', { count: 'exact', head: true }).eq('statut', 'credit'),
-    ])
-    setProduits(prods || [])
-    setCreditsBadge(creditsCount?.length ?? 0)
-    await loadVentes(dateHisto)
-    setLoading(false)
-  }
-
-  const loadVentes = async (date: string) => {
-    let query = supabase
-      .from('mla_ventes')
-      .select('*, employe:mla_employes(nom)')
-      .order('created_at', { ascending: false })
-    if (date) {
-      // Parse as local midnight to avoid UTC offset issues
-      const start = new Date(date + 'T00:00:00')
-      const end   = new Date(date + 'T23:59:59.999')
-      query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString())
-    } else {
-      query = query.limit(50)
-    }
-    const { data: ventes } = await query
-    setHistorique((ventes || []) as VenteExpanded[])
-  }
-
-  // ── Panier ─────────────────────────────────────────────────────────────────
-
-  const handleSelectProduit = (id: string) => {
-    setSelectedId(id)
-    const prod = produits.find(p => p.id === id)
-    setPrixUnit(prod?.prix || 0)
-    setQte(1)
-  }
-
-  const handleAjouter = () => {
-    if (!selectedId) return
-    const prod = produits.find(p => p.id === selectedId)
-    if (!prod) return
-    if (qte <= 0) return
-    if (qte > prod.quantite) {
-      setError(`Stock insuffisant pour "${prod.nom}" (dispo: ${prod.quantite})`)
-      return
-    }
-    setCart(prev => {
-      const existing = prev.find(i => i.produit.id === selectedId)
-      if (existing) {
-        const newQty = existing.quantite + qte
-        if (newQty > prod.quantite) { setError(`Stock insuffisant (dispo: ${prod.quantite})`); return prev }
-        return prev.map(i => i.produit.id === selectedId ? { ...i, quantite: newQty } : i)
-      }
-      return [...prev, { produit: prod, quantite: qte, prix_unitaire: prixUnit }]
-    })
-    setSelectedId(''); setQte(1); setPrixUnit(0); setError('')
-    setSearchKey(k => k + 1)
-    setAjoutMsg(true)
-    setTimeout(() => setAjoutMsg(false), 1800)
-  }
-
-  const removeFromCart = (produitId: string) =>
-    setCart(prev => prev.filter(i => i.produit.id !== produitId))
-
-  const updateQtyInCart = (produitId: string, newQty: number) => {
-    if (!newQty || newQty < 1) return
-    const item = cart.find(i => i.produit.id === produitId)
-    if (!item) return
-    if (newQty > item.produit.quantite) {
-      setError(`Stock insuffisant pour "${item.produit.nom}" (dispo: ${item.produit.quantite})`)
-      return
-    }
-    setError('')
-    setCart(prev => prev.map(i => i.produit.id === produitId ? { ...i, quantite: newQty } : i))
-  }
-
-  // ── Totaux ─────────────────────────────────────────────────────────────────
-
-  const sousTotal  = cart.reduce((acc, i) => acc + i.quantite * i.prix_unitaire, 0)
-  const nbArticles = cart.reduce((acc, i) => acc + i.quantite, 0)
-
-  const total = sousTotal
-
-  const montantPayeCalc = paiementPartiel
-    ? Math.min(parseFloat(montantPayeInput) || 0, total)
-    : total
-  const resteAPayer = Math.max(0, total - montantPayeCalc)
-  const estCredit   = paiementPartiel && montantPayeCalc < total
-
-  // ── Enregistrer ────────────────────────────────────────────────────────────
-
-  const resetCart = () => {
-    setCart([])
-    setNomClient(''); setTelephoneClient(''); setNotesVente('')
-    setPaiementPartiel(false); setMontantPayeInput(''); setModePaiement('especes')
-    setProformaMode(false); setProformaContact(''); setProformaValidite('30')
-    setSearchKey(k => k + 1)
-  }
-
-  const handleSave = async () => {
-    if (cart.length === 0) { setError('Ajoutez au moins un article'); return }
-
-    // ── Proforma : génère PDF, ne sauvegarde pas ──
-    if (proformaMode) {
-      if (!nomClient.trim()) { setError('Entrez le nom du client pour la proforma'); return }
-      setSaving(true)
-      genererProformaPDF({
-        numero: proformaNumero(),
-        date: proformaDateFR(),
-        client_nom: nomClient.trim(),
-        client_contact: proformaContact.trim() || undefined,
-        lignes: cart.map(i => ({ description: i.produit.nom, quantite: i.quantite, prix_unitaire: i.prix_unitaire })),
-        validite_jours: parseInt(proformaValidite) || 30,
-      } as ProformaData)
-      resetCart()
-      setSaving(false)
-      return
-    }
-
-    if (paiementPartiel && (!montantPayeInput || parseFloat(montantPayeInput) <= 0)) {
-      setError('Entrez le montant payé (doit être supérieur à 0)')
-      return
-    }
-    if (estCredit && !nomClient.trim()) { setError('Entrez le nom du client pour un paiement partiel'); return }
-    setSaving(true); setError('')
-    try {
-      const statut: VenteStatut = estCredit ? 'credit' : 'completee'
-
-      const { data: venteData, error: venteErr } = await supabase
-        .from('mla_ventes')
-        .insert({
-          employe_id: session?.employeId || null,
-          succursale_id: session?.succursaleId || null,
-          total,
-          statut,
-          nom_client: nomClient.trim() || null,
-          telephone_client: telephoneClient.trim() || null,
-          notes: notesVente.trim() || null,
-          montant_paye: montantPayeCalc,
-        })
-        .select().single()
-
-      if (venteErr || !venteData) { setError("Erreur lors de l'enregistrement"); return }
-
-      await supabase.from('mla_ventes_lignes').insert(
-        cart.map(i => ({
-          vente_id: venteData.id,
-          produit_id: i.produit.id,
-          quantite: i.quantite,
-          prix_unitaire: i.prix_unitaire,
-          sous_total: i.quantite * i.prix_unitaire,
-        }))
-      )
-
-      if (estCredit && montantPayeCalc > 0) {
-        await supabase.from('mla_credits_paiements').insert({
-          vente_id: venteData.id,
-          montant: montantPayeCalc,
-          date_paiement: new Date().toISOString().split('T')[0],
-          notes: 'Acompte à la vente',
-        })
-      }
-
-      for (const i of cart) {
-        await supabase.from('mla_produits')
-          .update({ quantite: i.produit.quantite - i.quantite })
-          .eq('id', i.produit.id)
-      }
-
-      resetCart()
-      await loadVentes(dateHisto)
-      setReceiptVenteId(venteData.id)
-    } catch {
-      setError('Une erreur est survenue')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // ── Historique ─────────────────────────────────────────────────────────────
-
-  const changerStatut = async (venteId: string, statut: VenteStatut) => {
-    await supabase.from('mla_ventes').update({ statut }).eq('id', venteId)
-    setHistorique(prev => prev.map(v => v.id === venteId ? { ...v, statut } : v))
-  }
-
-  const toggleExpand = async (venteId: string) => {
-    setHistorique(prev => prev.map(v => v.id !== venteId ? v : { ...v, expanded: !v.expanded }))
-    const vente = historique.find(v => v.id === venteId)
-    if (vente && !vente.lignes) {
-      const { data } = await supabase
-        .from('mla_ventes_lignes')
-        .select('*, produit:mla_produits(nom, prix)')
-        .eq('vente_id', venteId)
-      setHistorique(prev => prev.map(v => v.id !== venteId ? v : { ...v, lignes: (data || []) as VenteLigne[] }))
-    }
-  }
-
-  const shortRef = (id: string) => 'VE-' + id.slice(0, 6).toUpperCase()
-
-  if (loading) return <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
-
+function EtudiantSearch({ searchText, selectedId, suggestions, showSuggestions, placeholder, onChangeText, onFocus, onBlur, onSelect, onClear }: EtudiantSearchProps) {
   return (
-    <>
-      <ReceiptModal venteId={receiptVenteId} onClose={() => setReceiptVenteId(null)} />
-
-      {ajoutMsg && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2D6B2D] text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-xl whitespace-nowrap flex items-center gap-2">
-          <ShoppingCart size={14} /> Ajouté au panier
+    <div className="relative">
+      <Search size={14} className="absolute left-3 top-3 text-gray-400 pointer-events-none" />
+      <input
+        type="text"
+        value={searchText}
+        onChange={e => onChangeText(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        className={`w-full bg-[#FAF7F4] border rounded-xl pl-8 pr-8 py-2.5 text-sm focus:outline-none transition-colors
+          ${selectedId ? 'border-[#1B2A8A] font-semibold text-gray-900' : 'border-[#E8E2DC] text-gray-700 focus:border-[#1B2A8A]'}`}
+      />
+      {searchText && (
+        <button onClick={onClear} className="absolute right-3 top-2.5 text-gray-400 active:text-gray-600">
+          <X size={15} />
+        </button>
+      )}
+      {suggestions.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-lg border border-[#E8E2DC] overflow-hidden z-30">
+          {suggestions.map(e => (
+            <button key={e.id} onMouseDown={() => onSelect(e)}
+              className="w-full px-4 py-3 text-left text-sm text-gray-800 font-medium active:bg-[#1B2A8A]/5 hover:bg-gray-50 flex items-center gap-2 border-b border-[#F0EDE8] last:border-0">
+              <div className="w-6 h-6 rounded-lg bg-[#1B2A8A]/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-[10px] font-bold text-[#1B2A8A]">{e.nom[0].toUpperCase()}</span>
+              </div>
+              {e.nom}
+            </button>
+          ))}
         </div>
       )}
+      {showSuggestions && searchText && !selectedId && suggestions.length === 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-lg border border-[#E8E2DC] px-4 py-3 z-30">
+          <p className="text-sm text-gray-400">Aucun étudiant trouvé</p>
+        </div>
+      )}
+    </div>
+  )
+}
 
-      <div className="p-4 space-y-4 pb-24">
-        {/* ── HEADER ────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between pt-1">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-[#1A1210]">Ventes</h1>
-            <p className="text-[11px] text-[#78726A] mt-0.5">Enregistrez vos ventes et consultez l'historique</p>
-            <div className="w-10 h-0.5 bg-[#8B6400] rounded-full mt-1 mb-0.5" />
-            <p className="text-[11px] text-[#A09589] capitalize">{formatDate(new Date().toISOString())}</p>
-          </div>
-          {session?.succursaleNom && (
-            <div className="flex items-center gap-1.5 bg-[#2D6B2D] text-white text-xs font-semibold px-3 py-1.5 rounded-xl">
-              <MapPin size={11} />
-              {session.succursaleNom}
+export function VentesPage({ preselectStudentId, onMounted }: Props) {
+  const { session } = useAuth()
+  const { showToast } = useToast()
+
+  const [mode, setMode]                     = useState<Mode>('frais')
+  const [etudiants, setEtudiants]           = useState<{ id: number; nom: string }[]>([])
+  const [selectedId, setSelectedId]         = useState<number | null>(null)
+  const [etudiantInfo, setEtudiantInfo]     = useState<any>(null)
+  const [searchText, setSearchText]         = useState('')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  // Frais
+  const [fraisType, setFraisType]       = useState<TypeFrais>('inscription')
+  const [fraisMontant, setFraisMontant] = useState('')
+  const [savingFrais, setSavingFrais]   = useState(false)
+
+  // Produit
+  const [articles, setArticles]           = useState<Article[]>([])
+  const [panier, setPanier]               = useState<VenteLigne[]>([])
+  const [modeCredit, setModeCredit]       = useState(false)
+  const [montantPaye, setMontantPaye]     = useState('')
+  const [savingVente, setSavingVente]     = useState(false)
+  const [articleSearch, setArticleSearch] = useState('')
+  const [showArticleSug, setShowArticleSug] = useState(false)
+
+  // Reçu
+  const [recuDirect, setRecuDirect]   = useState<RecuDirectData | null>(null)
+  const [recuVenteId, setRecuVenteId] = useState<number | null>(null)
+
+  // Crédits
+  const [credits, setCredits]           = useState<CreditVente[]>([])
+  const [selectedCredit, setSelectedCredit] = useState<CreditVente | null>(null)
+  const [creditMontant, setCreditMontant]   = useState('')
+  const [savingCredit, setSavingCredit]     = useState(false)
+
+  // Transactions récentes
+  const [transactions, setTransactions] = useState<any[]>([])
+
+  useEffect(() => {
+    if (preselectStudentId !== null) {
+      setSelectedId(preselectStudentId)
+      setMode('frais')
+      onMounted()
+    }
+    loadBase()
+    loadTransactions()
+    loadCredits()
+  }, [])
+
+  useEffect(() => {
+    if (selectedId) loadEtudiantInfo(selectedId)
+    else setEtudiantInfo(null)
+  }, [selectedId])
+
+  // Sync nom dans l'input après chargement (preselect)
+  useEffect(() => {
+    if (selectedId && etudiants.length > 0 && !searchText) {
+      const found = etudiants.find(e => e.id === selectedId)
+      if (found) setSearchText(found.nom)
+    }
+  }, [selectedId, etudiants])
+
+  const handleSearchChange = (val: string) => {
+    setSearchText(val)
+    if (selectedId) { setSelectedId(null); setEtudiantInfo(null) }
+    setShowSuggestions(true)
+  }
+
+  const selectEtudiant = (e: { id: number; nom: string }) => {
+    setSelectedId(e.id)
+    setSearchText(e.nom)
+    setShowSuggestions(false)
+  }
+
+  const clearEtudiant = () => {
+    setSelectedId(null)
+    setSearchText('')
+    setShowSuggestions(false)
+    setEtudiantInfo(null)
+  }
+
+  const suggestions = showSuggestions && searchText && !selectedId
+    ? etudiants.filter(e => e.nom.toLowerCase().includes(searchText.toLowerCase())).slice(0, 6)
+    : []
+
+  const loadBase = async () => {
+    const [etuRes, artRes] = await Promise.all([
+      supabase.from('usr_etudiants').select('id, nom').eq('actif', true).order('nom'),
+      supabase.from('usr_articles').select('*').eq('actif', true).order('nom'),
+    ])
+    setEtudiants(etuRes.data || [])
+    setArticles(artRes.data || [])
+  }
+
+  const loadEtudiantInfo = async (id: number) => {
+    const { data } = await supabase.from('usr_etudiants')
+      .select('id, nom, frais_inscription, frais_inscription_paye, frais_formation_v1, frais_formation_v1_paye, frais_formation_v2, frais_formation_v2_paye')
+      .eq('id', id).single()
+    setEtudiantInfo(data)
+    if (data) {
+      for (const cfg of FRAIS_CONFIG) {
+        const d = data as Record<string, number>
+        const restant = (d[cfg.fieldTotal] || 0) - (d[cfg.fieldPaye] || 0)
+        if (restant > 0) {
+          setFraisType(cfg.type)
+          setFraisMontant(String(restant))
+          break
+        }
+      }
+    }
+  }
+
+  const loadTransactions = async () => {
+    const [ventesRes, paiementsRes] = await Promise.all([
+      supabase.from('usr_ventes').select('id, total, mode_paiement, montant_paye, created_at, etudiant:usr_etudiants(nom)').order('created_at', { ascending: false }).limit(15),
+      supabase.from('usr_paiements').select('id, montant, type_frais, created_at, etudiant:usr_etudiants(nom)').order('created_at', { ascending: false }).limit(15),
+    ])
+    const ventes    = (ventesRes.data    || []).map(v => ({ ...v, _type: 'vente'    }))
+    const paiements = (paiementsRes.data || []).map(p => ({ ...p, _type: 'paiement' }))
+    const mixed = [...ventes, ...paiements]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 20)
+    setTransactions(mixed)
+  }
+
+  const loadCredits = async () => {
+    const { data: ventes } = await supabase
+      .from('usr_ventes')
+      .select('id, total, montant_paye, created_at, etudiant:usr_etudiants(nom), usr_ventes_lignes(article_nom, quantite)')
+      .eq('mode_paiement', 'credit')
+      .order('created_at', { ascending: false })
+    const liste: CreditVente[] = (ventes || [])
+      .filter((v: any) => v.total - v.montant_paye > 0)
+      .map((v: any) => ({
+        id: v.id,
+        total: v.total,
+        montant_paye: v.montant_paye,
+        created_at: v.created_at,
+        etudiant_nom: Array.isArray(v.etudiant) ? v.etudiant[0]?.nom ?? null : v.etudiant?.nom ?? null,
+        articles: (v.usr_ventes_lignes || []).map((l: any) => `${l.article_nom} ×${l.quantite}`).join(', '),
+      }))
+    setCredits(liste)
+  }
+
+  const encaisserCredit = async () => {
+    if (!selectedCredit || !creditMontant) return
+    const montant = parseFloat(creditMontant)
+    if (!montant || montant <= 0) return
+    const max = selectedCredit.total - selectedCredit.montant_paye
+    const paye = Math.min(montant, max)
+    setSavingCredit(true)
+    const newMontantPaye = selectedCredit.montant_paye + paye
+    await supabase.from('usr_ventes').update({ montant_paye: newMontantPaye }).eq('id', selectedCredit.id)
+    setSelectedCredit(null)
+    setCreditMontant('')
+    setSavingCredit(false)
+    setRecuDirect({
+      titre: 'Reçu — paiement crédit',
+      etudiant: selectedCredit.etudiant_nom ?? undefined,
+      employe: session?.employeNom,
+      lignes: [{ nom: `Acompte crédit`, montant: paye }],
+      total: paye,
+      mode: 'Cash',
+      notes: `Reste dû après paiement : ${fmt(selectedCredit.total - newMontantPaye)}`,
+      date: new Date(),
+      code: 'FP-' + Date.now().toString(36).toUpperCase().slice(-6),
+    })
+    showToast(`${fmt(paye)} encaissé sur le crédit`)
+    loadCredits()
+    loadTransactions()
+  }
+
+  // ── Frais ──
+  const fraisRestant = (type: TypeFrais) => {
+    const cfg = FRAIS_CONFIG.find(c => c.type === type)!
+    return Math.max(0, (etudiantInfo?.[cfg.fieldTotal] || 0) - (etudiantInfo?.[cfg.fieldPaye] || 0))
+  }
+
+  const encaisserFrais = async () => {
+    if (!selectedId || !fraisMontant) return
+    const montant = parseFloat(fraisMontant)
+    if (!montant || montant <= 0) return
+    setSavingFrais(true)
+    const cfg = FRAIS_CONFIG.find(c => c.type === fraisType)!
+    const currentPaye = etudiantInfo?.[cfg.fieldPaye] || 0
+    setFraisMontant('')
+    await Promise.all([
+      supabase.from('usr_etudiants').update({ [cfg.fieldPaye]: currentPaye + montant }).eq('id', selectedId),
+      supabase.from('usr_paiements').insert({ etudiant_id: selectedId, employe_id: session?.employeId || null, type_frais: fraisType, montant }),
+    ])
+    setSavingFrais(false)
+    setRecuDirect({
+      titre: 'Reçu de paiement frais',
+      etudiant: etudiantInfo?.nom,
+      employe: session?.employeNom,
+      lignes: [{ nom: cfg.label, montant }],
+      total: montant,
+      mode: 'Cash',
+      date: new Date(),
+      code: 'FP-' + Date.now().toString(36).toUpperCase().slice(-6),
+    })
+    loadEtudiantInfo(selectedId)
+    loadTransactions()
+  }
+
+  // ── Produit ──
+  const addToCart = (article: Article) => {
+    setPanier(prev => {
+      const ex = prev.find(l => l.article_id === article.id)
+      if (ex) return prev.map(l => l.article_id === article.id ? { ...l, quantite: l.quantite + 1, total: (l.quantite + 1) * l.prix_unitaire } : l)
+      return [...prev, { article_id: article.id, article_nom: article.nom, quantite: 1, prix_unitaire: article.prix, total: article.prix }]
+    })
+  }
+
+  const updateQty = (article_id: number, delta: number) => {
+    setPanier(prev =>
+      prev.map(l => l.article_id === article_id ? { ...l, quantite: l.quantite + delta, total: (l.quantite + delta) * l.prix_unitaire } : l)
+          .filter(l => l.quantite > 0)
+    )
+  }
+
+  const totalPanier = panier.reduce((s, l) => s + l.total, 0)
+
+  const finaliserVente = async () => {
+    if (panier.length === 0) return
+    // Vérifier stock disponible
+    for (const l of panier) {
+      const art = articles.find(a => a.id === l.article_id)
+      if (art && art.stock < l.quantite) {
+        showToast(`Stock insuffisant : ${l.article_nom} (${art.stock} dispo)`)
+        return
+      }
+    }
+    const panierSnap = [...panier]
+    const totalSnap  = totalPanier
+    const etudiantNom = selectedId ? etudiants.find(e => e.id === selectedId)?.nom : undefined
+    const paye = modeCredit ? parseFloat(montantPaye) || 0 : totalSnap
+    setPanier([]); setModeCredit(false); setMontantPaye('')
+    showToast(`Vente de ${fmt(totalSnap)} enregistrée`)
+    setSavingVente(true)
+    const { data: vente } = await supabase.from('usr_ventes').insert({
+      etudiant_id: selectedId || null, employe_id: session?.employeId || null,
+      total: totalSnap, mode_paiement: modeCredit ? 'credit' : 'cash', montant_paye: paye,
+    }).select().single()
+    if (vente) {
+      await supabase.from('usr_ventes_lignes').insert(panierSnap.map(l => ({
+        vente_id: vente.id, article_id: l.article_id, article_nom: l.article_nom,
+        quantite: l.quantite, prix_unitaire: l.prix_unitaire, total: l.total,
+      })))
+      for (const l of panierSnap) {
+        await supabase.from('usr_articles').update({ stock: Math.max(0, (articles.find(a => a.id === l.article_id)?.stock ?? l.quantite) - l.quantite) }).eq('id', l.article_id)
+      }
+      // Affichage immédiat sans fetch supplémentaire
+      setRecuDirect({
+        titre: 'Recu de vente',
+        etudiant: etudiantNom,
+        employe: session?.employeNom,
+        lignes: panierSnap.map(l => ({ nom: l.article_nom, montant: l.total })),
+        total: totalSnap,
+        mode: modeCredit ? 'Credit' : 'Cash',
+        date: new Date(),
+        code: shortRef(vente.id),
+        venteId: vente.id,
+      })
+      // Mettre à jour le stock local pour que l'UI reflète le nouveau stock
+      setArticles(prev => prev.map(a => {
+        const l = panierSnap.find(x => x.article_id === a.id)
+        return l ? { ...a, stock: Math.max(0, a.stock - l.quantite) } : a
+      }))
+    }
+    setSavingVente(false)
+    loadTransactions()
+  }
+
+  return (
+    <div className="h-[calc(100vh-56px)] overflow-auto">
+      <div className="p-4 space-y-4 pb-10">
+
+        {/* ── Toggle mode ── */}
+        <div className="bg-white rounded-2xl p-1.5 flex shadow-sm border border-[#E8E2DC] gap-1">
+          {([
+            { m: 'frais'   as Mode, Icon: GraduationCap, label: 'Frais'    },
+            { m: 'produit' as Mode, Icon: ShoppingBag,   label: 'Vente'    },
+            { m: 'credits' as Mode, Icon: CreditCard,    label: 'Crédits', badge: credits.length },
+          ]).map(({ m, Icon, label, badge }) => (
+            <button key={m} onClick={() => setMode(m)}
+              className={`flex-1 relative flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all
+                ${mode === m ? 'bg-[#1B2A8A] text-white shadow-sm' : 'text-gray-400 active:bg-gray-50'}`}>
+              <Icon size={14} />{label}
+              {badge != null && badge > 0 && (
+                <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none
+                  ${mode === m ? 'bg-white text-[#1B2A8A]' : 'bg-[#A01020] text-white'}`}>
+                  {badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── MODE FRAIS : étudiant d'abord ── */}
+        {mode === 'frais' && (
+          <>
+            {/* Étudiant (requis) */}
+            <EtudiantSearch
+              searchText={searchText} selectedId={selectedId}
+              suggestions={suggestions} showSuggestions={showSuggestions}
+              placeholder="Chercher un étudiant..."
+              onChangeText={handleSearchChange}
+              onFocus={() => { if (!selectedId) setShowSuggestions(true) }}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              onSelect={selectEtudiant} onClear={clearEtudiant}
+            />
+
+            {!selectedId ? (
+              <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-[#F0EDE8]">
+                <GraduationCap size={28} className="text-[#1B2A8A]/30 mx-auto mb-3" />
+                <p className="text-gray-400 text-sm">Sélectionne un étudiant pour encaisser ses frais</p>
+              </div>
+            ) : etudiantInfo ? (
+              <>
+                {(() => {
+                  const nonSoldes = FRAIS_CONFIG.filter(cfg =>
+                    Math.max(0, (etudiantInfo[cfg.fieldTotal] || 0) - (etudiantInfo[cfg.fieldPaye] || 0)) > 0
+                  )
+                  if (nonSoldes.length === 0) return (
+                    <div className="bg-white rounded-2xl p-6 text-center border border-[#F0EDE8]">
+                      <Check size={22} className="text-green-500 mx-auto mb-2" />
+                      <p className="text-sm font-semibold text-gray-700">Tout est soldé</p>
+                      <p className="text-xs text-gray-400 mt-1">Aucun frais en attente pour cet étudiant</p>
+                    </div>
+                  )
+                  return nonSoldes.map(cfg => {
+                    const total   = etudiantInfo[cfg.fieldTotal] || 0
+                    const paye    = etudiantInfo[cfg.fieldPaye]  || 0
+                    const restant = Math.max(0, total - paye)
+                    const pct     = total > 0 ? Math.round((paye / total) * 100) : 0
+                    const isSel   = fraisType === cfg.type
+                    return (
+                      <button key={cfg.type}
+                        onClick={() => { setFraisType(cfg.type); setFraisMontant(String(restant)) }}
+                        className={`w-full text-left p-4 rounded-2xl border-2 transition-all shadow-sm
+                          ${isSel ? 'bg-[#1B2A8A]/5 border-[#1B2A8A]' : 'bg-white border-[#E8E2DC]'}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-bold text-sm text-gray-800">{cfg.label}</p>
+                          <span className={`text-sm font-bold ${isSel ? 'text-[#1B2A8A]' : 'text-[#A01020]'}`}>{fmt(restant)} dû</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct > 0 ? '#f97316' : '#e5e7eb' }} />
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">{fmt(paye)} payé / {fmt(total)}</p>
+                      </button>
+                    )
+                  })
+                })()}
+                {fraisRestant(fraisType) > 0 && (
+                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E2DC] space-y-3">
+                    <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Montant à encaisser</p>
+                    <input type="number" value={fraisMontant} onChange={e => setFraisMontant(e.target.value)}
+                      placeholder={`Max ${fmt(fraisRestant(fraisType))}`}
+                      className="w-full bg-[#FAF7F4] border border-[#E8E2DC] rounded-xl px-4 py-3 text-2xl font-bold text-gray-900 focus:outline-none focus:border-[#1B2A8A]" />
+                    <button onClick={encaisserFrais} disabled={savingFrais || !fraisMontant}
+                      className="w-full bg-[#A01020] text-white py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-transform disabled:opacity-50 shadow-md">
+                      {savingFrais ? 'Enregistrement...' : `Confirmer — ${fraisMontant ? fmt(parseFloat(fraisMontant) || 0) : '0 HTG'}`}
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </>
+        )}
+
+        {/* ── MODE PRODUIT : produit d'abord, étudiant après ── */}
+        {mode === 'produit' && (
+          <>
+            {/* 1. Recherche produit */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-3 text-gray-400 pointer-events-none" />
+              <input type="text" value={articleSearch}
+                onChange={e => { setArticleSearch(e.target.value) }}
+                placeholder="Filtrer les produits..."
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl pl-8 pr-8 py-3 text-sm focus:outline-none focus:border-[#1B2A8A] shadow-sm"
+              />
+              {articleSearch && (
+                <button onClick={() => setArticleSearch('')} className="absolute right-3 top-3 text-gray-400">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
+            {/* 1b. Grille articles */}
+            {(() => {
+              const filtered = articles.filter(a =>
+                !articleSearch || a.nom.toLowerCase().includes(articleSearch.toLowerCase())
+              )
+              if (filtered.length === 0) return (
+                <div className="bg-white rounded-2xl p-6 text-center border border-[#E8E2DC]">
+                  <p className="text-sm text-gray-400">Aucun produit trouvé</p>
+                </div>
+              )
+              return (
+                <div className="grid grid-cols-2 gap-2">
+                  {filtered.map(a => {
+                    const inCart = panier.find(l => l.article_id === a.id)
+                    const stockOk = a.stock > 0
+                    return (
+                      <button key={a.id}
+                        onClick={() => { if (stockOk) addToCart(a) }}
+                        disabled={!stockOk}
+                        className={`bg-white rounded-2xl p-3 text-left border shadow-sm active:scale-[0.97] transition-transform flex flex-col gap-1 ${
+                          inCart ? 'border-[#1B2A8A] bg-[#1B2A8A]/3' : stockOk ? 'border-[#E8E2DC]' : 'border-[#E8E2DC] opacity-45'
+                        }`}>
+                        <p className="text-xs font-bold text-gray-900 leading-snug line-clamp-2">{a.nom}</p>
+                        <p className="text-xs font-bold text-[#A01020]">{fmt(a.prix)}</p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            a.stock === 0 ? 'bg-red-100 text-red-500' :
+                            a.stock < 5  ? 'bg-orange-100 text-orange-600' :
+                            'bg-gray-100 text-gray-500'
+                          }`}>
+                            {a.stock === 0 ? 'Rupture' : `Stock: ${a.stock}`}
+                          </span>
+                          {inCart && (
+                            <span className="text-[10px] font-bold text-[#1B2A8A] bg-[#1B2A8A]/10 px-1.5 py-0.5 rounded-full">
+                              ×{inCart.quantite}
+                            </span>
+                          )}
+                        </div>
+                        {stockOk && (
+                          <div className="w-full bg-[#A01020] text-white rounded-xl py-1 text-center text-[11px] font-bold mt-1">
+                            + Ajouter
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+
+            {/* 2. Panier */}
+            {panier.length > 0 && (
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E2DC] space-y-2.5">
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Panier</p>
+                {panier.map(l => (
+                  <div key={l.article_id} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{l.article_nom}</p>
+                      <p className="text-xs text-gray-400">{fmt(l.prix_unitaire)} × {l.quantite}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => updateQty(l.article_id, -1)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center"><Minus size={12} /></button>
+                      <span className="w-6 text-center text-sm font-bold">{l.quantite}</span>
+                      <button onClick={() => updateQty(l.article_id, 1)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center"><Plus size={12} /></button>
+                      <button onClick={() => setPanier(p => p.filter(x => x.article_id !== l.article_id))} className="w-7 h-7 rounded-lg bg-red-50 ml-1 flex items-center justify-center"><Trash2 size={12} className="text-red-400" /></button>
+                    </div>
+                    <span className="text-sm font-bold text-gray-900 w-20 text-right">{fmt(l.total)}</span>
+                  </div>
+                ))}
+
+                {/* 3. Étudiant (optionnel, dans le panier) */}
+                <div className="pt-2 border-t border-[#F0EDE8]">
+                  <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5">Étudiant (optionnel)</p>
+                  <EtudiantSearch
+                    searchText={searchText} selectedId={selectedId}
+                    suggestions={suggestions} showSuggestions={showSuggestions}
+                    placeholder="Attacher à un étudiant..."
+                    onChangeText={handleSearchChange}
+                    onFocus={() => { if (!selectedId) setShowSuggestions(true) }}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                    onSelect={selectEtudiant} onClear={clearEtudiant}
+                  />
+                </div>
+
+                {/* 4. Total + confirmer */}
+                <div className="pt-2 border-t border-[#F0EDE8] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-gray-900">Total</span>
+                    <span className="text-xl font-bold text-[#A01020]">{fmt(totalPanier)}</span>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" checked={modeCredit} onChange={e => setModeCredit(e.target.checked)} className="accent-[#1B2A8A]" />
+                    À crédit
+                  </label>
+                  {modeCredit && (
+                    <input type="number" value={montantPaye} onChange={e => setMontantPaye(e.target.value)}
+                      placeholder="Montant reçu (HTG)"
+                      className="w-full bg-[#FAF7F4] border border-[#E8E2DC] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  )}
+                  <button onClick={finaliserVente} disabled={savingVente}
+                    className="w-full bg-[#A01020] text-white py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-transform disabled:opacity-50 shadow-md">
+                    {savingVente ? 'Enregistrement...' : `Confirmer — ${fmt(totalPanier)}`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── MODE CRÉDITS ── */}
+        {mode === 'credits' && (
+          credits.length === 0 ? (
+            <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-[#F0EDE8]">
+              <CreditCard size={28} className="text-[#1B2A8A]/30 mx-auto mb-3" />
+              <p className="text-gray-400 text-sm font-semibold">Aucun crédit en attente</p>
+              <p className="text-gray-300 text-xs mt-1">Toutes les ventes à crédit sont soldées</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">{credits.length} crédit{credits.length > 1 ? 's' : ''} en attente</p>
+              {credits.map((c, idx) => {
+                const restant = c.total - c.montant_paye
+                const pct = Math.round((c.montant_paye / c.total) * 100)
+                return (
+                  <button key={c.id} onClick={() => { setSelectedCredit(c); setCreditMontant(String(restant)) }}
+                    className="w-full text-left bg-white rounded-2xl p-4 shadow-sm border border-[#E8E2DC] active:scale-[0.99] transition-transform animate-card-in"
+                    style={{ animationDelay: `${idx * 50}ms` }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-bold text-gray-900 text-sm truncate">{c.etudiant_nom || 'Client anonyme'}</p>
+                          <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">Crédit</span>
+                        </div>
+                        {c.articles && <p className="text-xs text-gray-400 truncate mt-0.5">{c.articles}</p>}
+                        <p className="text-xs text-gray-300 mt-1">{new Date(c.created_at).toLocaleDateString('fr-HT')}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0 flex items-center gap-2">
+                        <div>
+                          <p className="text-sm font-black text-[#A01020]">{fmt(restant)}</p>
+                          <p className="text-xs text-gray-400">restant</p>
+                        </div>
+                        <ChevronRight size={16} className="text-gray-300" />
+                      </div>
+                    </div>
+                    <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-orange-400 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{fmt(c.montant_paye)} payé / {fmt(c.total)}</p>
+                  </button>
+                )
+              })}
+            </div>
+          )
+        )}
+
+        {/* ── TRANSACTIONS RÉCENTES ── */}
+        <div>
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-3">Transactions récentes</p>
+          {transactions.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-[#E8E2DC] animate-fade-in">
+              <div className="w-11 h-11 rounded-2xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-3">
+                <ShoppingBag size={20} className="text-[#1B2A8A]/40" />
+              </div>
+              <p className="font-semibold text-gray-500 text-sm">Aucune transaction</p>
+              <p className="text-xs text-gray-400 mt-1">Les ventes et frais encaissés apparaissent ici</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {transactions.map((t, i) => {
+                const etudiantNom = Array.isArray(t.etudiant) ? t.etudiant[0]?.nom : t.etudiant?.nom
+                const isVente = t._type === 'vente'
+                return (
+                  <div key={i} className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#F0EDE8] flex items-center gap-3 animate-card-in" style={{ animationDelay: `${Math.min(i, 6) * 25}ms` }}>
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${isVente ? 'bg-[#1B2A8A]/10' : 'bg-[#A01020]/10'}`}>
+                      {isVente ? <ShoppingBag size={14} className="text-[#1B2A8A]" /> : <GraduationCap size={14} className="text-[#A01020]" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{etudiantNom || 'Caisse'}</p>
+                      <p className="text-xs text-gray-400">
+                        {isVente ? 'Vente produit' : (TYPE_FRAIS_LABEL[t.type_frais] || t.type_frais)}
+                        {' · '}{new Date(t.created_at).toLocaleDateString('fr-HT')}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0 flex items-center gap-2">
+                      <div>
+                        <p className={`text-sm font-bold ${isVente ? 'text-[#1B2A8A]' : 'text-[#A01020]'}`}>
+                          {fmt(isVente ? t.total : t.montant)}
+                        </p>
+                        {isVente && t.mode_paiement === 'credit' && (
+                          <p className="text-xs text-orange-500">Crédit</p>
+                        )}
+                      </div>
+                      {isVente ? (
+                        <button
+                          onClick={() => setRecuVenteId(t.id)}
+                          className="w-8 h-8 rounded-xl bg-[#1B2A8A]/8 flex items-center justify-center active:bg-[#1B2A8A]/20 transition-colors flex-shrink-0">
+                          <Printer size={14} className="text-[#1B2A8A]" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setRecuDirect({
+                            titre: 'Recu de paiement frais',
+                            etudiant: etudiantNom || undefined,
+                            employe: session?.employeNom,
+                            lignes: [{ nom: TYPE_FRAIS_LABEL[t.type_frais] || t.type_frais, montant: t.montant }],
+                            total: t.montant,
+                            mode: 'Cash',
+                            date: new Date(t.created_at),
+                            code: 'FP-' + t.id.toString(36).toUpperCase().slice(-6),
+                          })}
+                          className="w-8 h-8 rounded-xl bg-[#A01020]/8 flex items-center justify-center active:bg-[#A01020]/20 transition-colors flex-shrink-0">
+                          <Printer size={14} className="text-[#A01020]" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
 
-        {/* ── TABS ──────────────────────────────────────────────────────── */}
-        <div className="flex gap-1 bg-[#E8E0D0] rounded-xl p-1">
-          <button
-            onClick={() => setActiveTab('vente')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-              activeTab === 'vente' ? 'bg-white text-[#2D6B2D] shadow-sm' : 'text-[#78726A]'
-            }`}
-          >
-            <ShoppingCart size={14} /> Vente rapide
-          </button>
-          <button
-            onClick={() => setActiveTab('credits')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-              activeTab === 'credits' ? 'bg-white text-[#2D6B2D] shadow-sm' : 'text-[#78726A]'
-            }`}
-          >
-            <CreditCard size={14} /> Crédits
-            {creditsBadge > 0 && (
-              <span className="bg-amber-400 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                {creditsBadge}
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* ── TAB CRÉDITS ───────────────────────────────────────────────── */}
-        {activeTab === 'credits' && <CreditTab />}
-
-        {/* ── TAB VENTE RAPIDE ──────────────────────────────────────────── */}
-        {activeTab === 'vente' && (
-          <>
-            <Card>
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <ShoppingCart size={17} className="text-[#4A4540]" />
-                  <h2 className="text-base font-bold text-[#1A1210]">Vente rapide</h2>
-                  {cart.length > 0 && (
-                    <Badge variant="info">{nbArticles} article{nbArticles > 1 ? 's' : ''}</Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {session?.employeNom && <Badge variant="warning">{session.employeNom}</Badge>}
-                  <button
-                    onClick={() => setProformaMode(p => !p)}
-                    className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
-                      proformaMode
-                        ? 'bg-[#1C2B6E] text-white border-[#1C2B6E]'
-                        : 'border-[#D4CAB8] text-[#78726A] hover:border-[#1C2B6E]'
-                    }`}
-                  >
-                    <FileText size={12} /> Proforma
-                  </button>
-                </div>
-              </div>
-
-              {/* Sélecteur produit */}
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-[#78726A] font-medium mb-1 block">Produit</label>
-                  <ProductSearch
-                    key={searchKey}
-                    produits={produits}
-                    onSelect={p => p ? handleSelectProduit(p.id) : (setSelectedId(''), setPrixUnit(0))}
-                    placeholder="Taper pour chercher un produit..."
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-[#78726A] font-medium mb-1 block">Qté</label>
-                    <input type="number" min={1} value={qte}
-                      onChange={e => setQte(parseInt(e.target.value) || 1)}
-                      className="w-full border border-[#D4CAB8] rounded-xl px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-[#78726A] font-medium mb-1 block">Prix unit. (HTG)</label>
-                    <input type="number" min={0} value={prixUnit}
-                      onChange={e => setPrixUnit(parseFloat(e.target.value) || 0)}
-                      className="w-full border border-[#D4CAB8] rounded-xl px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleAjouter}
-                  disabled={!selectedId}
-                  className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-all ${
-                    selectedId
-                      ? 'bg-[#3DAA35] text-white shadow-md hover:bg-[#2D8B2D] active:scale-95'
-                      : 'border border-dashed border-[#D4CAB8] text-[#A09589] cursor-not-allowed'
-                  }`}
-                >
-                  <Plus size={16} /> Ajouter au panier
-                </button>
-              </div>
-
-              {/* Panier */}
-              {cart.length > 0 && (
-                <div className="mt-4 border border-[#D4CAB8] rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-[#FAF7F2] text-xs text-[#78726A] font-semibold">
-                        <th className="text-left px-3 py-2">Article</th>
-                        <th className="text-center px-2 py-2">Qté</th>
-                        <th className="text-right px-2 py-2">Prix</th>
-                        <th className="text-right px-2 py-2">Total</th>
-                        <th className="px-2 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {cart.map(item => (
-                        <tr key={item.produit.id} className="bg-white">
-                          <td className="px-3 py-2.5 text-[#2C2420] font-medium max-w-[100px]">
-                            <span className="block truncate">{item.produit.nom}</span>
-                          </td>
-                          <td className="px-1 py-1.5 text-center">
-                            <input
-                              type="number"
-                              min="1"
-                              max={item.produit.quantite}
-                              value={item.quantite}
-                              onChange={e => {
-                                const v = parseInt(e.target.value)
-                                if (!isNaN(v)) updateQtyInCart(item.produit.id, v)
-                              }}
-                              onFocus={e => e.target.select()}
-                              className="w-14 text-center border border-[#D4CAB8] rounded-lg py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#3DAA35]"
-                            />
-                          </td>
-                          <td className="px-2 py-2.5 text-right text-[#78726A] whitespace-nowrap">
-                            {item.prix_unitaire.toLocaleString()} G
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-semibold text-[#2C2420] whitespace-nowrap">
-                            {(item.quantite * item.prix_unitaire).toLocaleString()} G
-                          </td>
-                          <td className="px-2 py-2.5 text-center">
-                            <button onClick={() => removeFromCart(item.produit.id)} className="text-red-400 hover:text-red-600">
-                              <X size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-[#FAF7F2] border-t border-[#D4CAB8]">
-                        <td colSpan={3} className="px-3 py-2.5 text-sm font-bold text-[#2C2420]">SOUS-TOTAL</td>
-                        <td className="px-2 py-2.5 text-right font-bold text-base text-[#F59E0B] whitespace-nowrap">
-                          {sousTotal.toLocaleString()} G
-                        </td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-
-              {/* ── PAIEMENT + CLIENT ─────────────────────────────── */}
-              {cart.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-[#D4CAB8] space-y-4">
-                  {!proformaMode ? (
-                    <>
-                      {/* ── Infos client ── */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-[#78726A] block">
-                          Client {estCredit && <span className="text-red-500">*</span>}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={estCredit ? 'Nom du client (requis)' : 'Client de passage'}
-                          value={nomClient}
-                          onChange={e => setNomClient(e.target.value)}
-                          className={`w-full border rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 ${
-                            estCredit && !nomClient.trim()
-                              ? 'border-amber-300 bg-amber-50 focus:ring-amber-400'
-                              : 'border-[#D4CAB8] focus:ring-[#3DAA35]'
-                          }`}
-                        />
-                        <input
-                          type="tel"
-                          placeholder="Téléphone (optionnel)"
-                          value={telephoneClient}
-                          onChange={e => setTelephoneClient(e.target.value)}
-                          className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
-                        />
-                      </div>
-
-                      {/* Paiement : Total / Partiel */}
-                      <div>
-                        <label className="text-xs font-semibold text-[#78726A] mb-2 block">Paiement</label>
-                        <div className="flex gap-6">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="paiement" checked={!paiementPartiel}
-                              onChange={() => { setPaiementPartiel(false); setMontantPayeInput('') }}
-                              className="w-5 h-5 accent-[#3DAA35]"
-                            />
-                            <span className="text-sm font-medium text-[#2C2420]">Total</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="paiement" checked={paiementPartiel}
-                              onChange={() => setPaiementPartiel(true)}
-                              className="w-5 h-5 accent-[#3DAA35]"
-                            />
-                            <span className="text-sm font-medium text-[#2C2420]">Partiel</span>
-                          </label>
-                        </div>
-                        {paiementPartiel && (
-                          <input
-                            type="number" min="0"
-                            placeholder="Montant payé (G)"
-                            value={montantPayeInput}
-                            onChange={e => setMontantPayeInput(e.target.value)}
-                            className="mt-2 w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35]"
-                          />
-                        )}
-                      </div>
-
-                      {/* Mode paiement */}
-                      <div>
-                        <label className="text-xs font-semibold text-[#78726A] mb-1.5 block">Mode</label>
-                        <select
-                          value={modePaiement}
-                          onChange={e => setModePaiement(e.target.value)}
-                          className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white"
-                        >
-                          <option value="especes">Espèces</option>
-                          <option value="moncash">MonCash</option>
-                          <option value="cheque">Chèque</option>
-                          <option value="virement">Virement</option>
-                        </select>
-                      </div>
-
-                      {/* Barre récap */}
-                      <div className="bg-[#FAF7F2] rounded-xl px-4 py-3 border border-[#E8E0D0]">
-                        {/* Reste dû — valeur principale */}
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-[#78726A]">Reste dû</p>
-                          <p className={`text-2xl font-black ${resteAPayer > 0 ? 'text-amber-600' : 'text-[#3DAA35]'}`}>
-                            {formatHTG(resteAPayer)}
-                          </p>
-                        </div>
-                        {/* Total + Payé — secondaires */}
-                        <div className="flex items-center justify-between text-xs text-[#A09589] border-t border-[#E8E0D0] pt-2">
-                          <span>Total : <span className="font-semibold text-[#4A4540]">{formatHTG(total)}</span></span>
-                          <span>Payé : <span className="font-semibold text-[#3DAA35]">{formatHTG(montantPayeCalc)}</span></span>
-                        </div>
-                      </div>
-
-                      {/* Notes */}
-                      <div>
-                        <label className="text-xs font-semibold text-[#78726A] mb-1.5 block">Notes (optionnel)</label>
-                        <textarea
-                          placeholder="Observations, remarques..."
-                          value={notesVente}
-                          onChange={e => setNotesVente(e.target.value)}
-                          rows={2}
-                          className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35] resize-none"
-                        />
-                      </div>
-
-                      {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
-
-                      <Button onClick={handleSave} loading={saving} className="w-full py-4 text-base font-bold rounded-xl">
-                        Vendre ({nbArticles} article{nbArticles > 1 ? 's' : ''})
-                      </Button>
-                    </>
-                  ) : (
-                    /* Mode Proforma */
-                    <>
-                      <p className="text-xs text-[#A09589] bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
-                        PDF généré à partir du panier. Aucune vente enregistrée.
-                      </p>
-                      <div>
-                        <label className="text-xs font-semibold text-[#78726A] mb-1.5 block">Client *</label>
-                        <input
-                          type="text" placeholder="Nom du client"
-                          value={nomClient} onChange={e => setNomClient(e.target.value)}
-                          className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#1C2B6E]"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-[#78726A] mb-1.5 block">Contact (optionnel)</label>
-                        <input
-                          type="text" placeholder="Tél, email..."
-                          value={proformaContact} onChange={e => setProformaContact(e.target.value)}
-                          className="w-full border border-[#D4CAB8] rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#1C2B6E]"
-                        />
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <label className="text-xs font-semibold text-[#78726A] whitespace-nowrap">Valide</label>
-                        <input
-                          type="number" min="1" value={proformaValidite}
-                          onChange={e => setProformaValidite(e.target.value)}
-                          className="w-24 border border-[#D4CAB8] rounded-xl px-3 py-3 text-base text-center focus:outline-none focus:ring-2 focus:ring-[#1C2B6E]"
-                        />
-                        <label className="text-xs text-[#78726A]">jours</label>
-                      </div>
-                      {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
-                      <Button onClick={handleSave} loading={saving} className="w-full py-4 text-base font-bold rounded-xl">
-                        <span className="flex items-center justify-center gap-2"><FileText size={16} /> Générer PDF Proforma</span>
-                      </Button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {cart.length === 0 && error && (
-                <p className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2 mt-3">{error}</p>
-              )}
-            </Card>
-
-            {/* ── HISTORIQUE ──────────────────────────────────────────── */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-1 h-4 bg-[#F59E0B] rounded-full" />
-                <h3 className="text-base font-bold text-[#1A1210]">Reçus</h3>
-              </div>
-
-              {/* Recherche + date */}
-              <div className="flex gap-2 mb-2">
-                <div className="relative flex-1">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A09589]" />
-                  <input
-                    type="text"
-                    placeholder="Client, réf..."
-                    value={searchHisto}
-                    onChange={e => setSearchHisto(e.target.value)}
-                    className="w-full border border-[#D4CAB8] rounded-xl pl-9 pr-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white"
-                  />
-                </div>
-                <div className="relative">
-                  <input
-                    type="date"
-                    value={dateHisto}
-                    onChange={e => setDateHisto(e.target.value)}
-                    className="border border-[#D4CAB8] rounded-xl px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-[#3DAA35] bg-white pr-8"
-                  />
-                  {dateHisto && (
-                    <button
-                      onClick={() => setDateHisto('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[#A09589] hover:text-[#2C2420]"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2 mb-3">
-                <button
-                  onClick={() => {
-                    const d = new Date()
-                    const y = d.getFullYear()
-                    const m = String(d.getMonth() + 1).padStart(2, '0')
-                    const j = String(d.getDate()).padStart(2, '0')
-                    setDateHisto(`${y}-${m}-${j}`)
-                  }}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                    dateHisto === (() => {
-                      const d = new Date()
-                      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-                    })()
-                      ? 'bg-[#3DAA35] text-white border-[#3DAA35]'
-                      : 'border-[#D4CAB8] text-[#78726A] bg-white'
-                  }`}
-                >
-                  Aujourd'hui
-                </button>
-                <button
-                  onClick={() => setDateHisto('')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                    !dateHisto ? 'bg-[#F59E0B] text-white border-[#F59E0B]' : 'border-[#D4CAB8] text-[#78726A] bg-white'
-                  }`}
-                >
-                  Récentes
-                </button>
-              </div>
-
-              {(() => {
-                const q = searchHisto.trim().toLowerCase()
-                const filtres = q
-                  ? historique.filter(v =>
-                      (v.nom_client || '').toLowerCase().includes(q) ||
-                      shortRef(v.id).toLowerCase().includes(q) ||
-                      (v.telephone_client || '').includes(q)
-                    )
-                  : historique
-                return filtres.length === 0 ? (
-                <Card>
-                  <p className="text-sm text-[#A09589] text-center py-4">
-                    {q ? 'Aucun reçu correspondant' : dateHisto ? 'Aucune vente ce jour' : 'Aucune vente enregistrée'}
-                  </p>
-                </Card>
-              ) : (
-                <>
-                  <p className="text-[11px] text-[#A09589] mb-2">{filtres.length} vente{filtres.length > 1 ? 's' : ''}</p>
-                  <div className="space-y-2">
-                  {filtres.map(v => (
-                    <Card key={v.id} className="p-0 overflow-hidden">
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-base font-bold text-[#2C2420]">{formatHTG(v.total)}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STATUT_BADGE[v.statut || 'completee'].color}`}>
-                              {STATUT_BADGE[v.statut || 'completee'].label}
-                            </span>
-                            {v.nom_client && (
-                              <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                                {v.nom_client}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-[#A09589]">
-                            <span>{formatTime(v.created_at)}</span>
-                            {(v.employe as { nom: string } | undefined)?.nom && (
-                              <span className="font-medium text-[#78726A]">• {(v.employe as { nom: string }).nom}</span>
-                            )}
-                            <span className="text-[#D4CAB8]">{shortRef(v.id)}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <button
-                            onClick={() => setReceiptVenteId(v.id)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#A09589] hover:text-[#3DAA35] hover:bg-[#EEF7EE] transition-colors"
-                          >
-                            <Receipt size={16} />
-                          </button>
-                          <button
-                            onClick={() => toggleExpand(v.id)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#A09589] hover:bg-[#FAF7F2] transition-colors text-xs font-bold"
-                          >
-                            {v.expanded ? '▲' : '▼'}
-                          </button>
-                          {v.statut === 'completee' && session?.role === 'admin' && (
-                            <button
-                              onClick={() => changerStatut(v.id, 'annulee')}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg text-red-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {v.expanded && (
-                        <div className="border-t border-slate-50 px-4 pb-3 pt-2 space-y-1.5">
-                          {v.lignes ? v.lignes.map((l, i) => (
-                            <div key={i} className="flex items-center justify-between text-sm">
-                              <span className="text-[#78726A]">
-                                {(l.produit as Produit | undefined)?.nom || 'Produit'} × {l.quantite}
-                              </span>
-                              <span className="text-[#4A4540] font-medium">{formatHTG(l.sous_total)}</span>
-                            </div>
-                          )) : (
-                            <div className="flex justify-center py-2"><Spinner size="sm" /></div>
-                          )}
-                          {v.statut === 'completee' && session?.role === 'admin' && (
-                            <button
-                              onClick={() => changerStatut(v.id, 'retour')}
-                              className="flex items-center gap-1 text-xs text-[#F59E0B] font-semibold hover:underline pt-1"
-                            >
-                              <RotateCcw size={12} /> Marquer comme retour
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </Card>
-                  ))}
-                  </div>
-                </>
-              )
-              })()}
-            </div>
-          </>
-        )}
       </div>
-    </>
+
+      <ReceiptModal
+        directData={recuDirect}
+        onClose={() => setRecuDirect(null)}
+      />
+      <ReceiptModal
+        venteId={recuVenteId}
+        onClose={() => setRecuVenteId(null)}
+      />
+
+      {/* ── BOTTOM SHEET : Paiement crédit ── */}
+      {selectedCredit && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end"
+          onClick={e => { if (e.target === e.currentTarget) setSelectedCredit(null) }}>
+          <div className="bg-[#FAF7F4] w-full rounded-t-3xl animate-modal-up">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
+            <div className="px-5 pt-3 pb-8 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Encaisser un crédit</h3>
+                  <p className="text-sm text-gray-400">{selectedCredit.etudiant_nom || 'Client anonyme'}</p>
+                </div>
+                <button onClick={() => setSelectedCredit(null)}
+                  className="w-8 h-8 rounded-full bg-white border border-[#E8E2DC] flex items-center justify-center">
+                  <X size={15} className="text-gray-500" />
+                </button>
+              </div>
+
+              {selectedCredit.articles && (
+                <div className="bg-white rounded-2xl px-4 py-3 border border-[#E8E2DC]">
+                  <p className="text-xs text-gray-400 mb-1">Articles</p>
+                  <p className="text-sm text-gray-700">{selectedCredit.articles}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <div className="flex-1 bg-white rounded-2xl px-4 py-3 border border-[#E8E2DC] text-center">
+                  <p className="text-xs text-gray-400">Total</p>
+                  <p className="text-base font-bold text-gray-900">{fmt(selectedCredit.total)}</p>
+                </div>
+                <div className="flex-1 bg-white rounded-2xl px-4 py-3 border border-[#E8E2DC] text-center">
+                  <p className="text-xs text-gray-400">Déjà payé</p>
+                  <p className="text-base font-bold text-green-600">{fmt(selectedCredit.montant_paye)}</p>
+                </div>
+                <div className="flex-1 bg-orange-50 rounded-2xl px-4 py-3 border border-orange-200 text-center">
+                  <p className="text-xs text-orange-500">Restant</p>
+                  <p className="text-base font-bold text-orange-600">{fmt(selectedCredit.total - selectedCredit.montant_paye)}</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Montant encaissé</label>
+                <input type="number" value={creditMontant} onChange={e => setCreditMontant(e.target.value)}
+                  placeholder={`Max ${fmt(selectedCredit.total - selectedCredit.montant_paye)}`}
+                  className="w-full bg-white border border-[#E8E2DC] rounded-xl px-4 py-3 text-2xl font-bold text-gray-900 focus:outline-none focus:border-[#1B2A8A]" />
+              </div>
+
+              <button onClick={encaisserCredit} disabled={savingCredit || !creditMontant}
+                className="w-full bg-[#A01020] text-white py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-transform disabled:opacity-50 shadow-md">
+                {savingCredit ? 'Enregistrement...' : `Confirmer — ${creditMontant ? fmt(parseFloat(creditMontant) || 0) : '0 HTG'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
   )
 }

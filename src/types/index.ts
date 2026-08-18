@@ -1,155 +1,104 @@
 export type Role = 'admin' | 'employe'
+export type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2'
 
 export interface Session {
   role: Role
-  employeId?: string
+  employeId?: number
   employeNom?: string
-  succursaleId?: string
-  succursaleNom?: string
 }
 
 export interface Employe {
-  id: string
+  id: number
   nom: string
-  email?: string
   mot_de_passe?: string
-  succursale_id?: string
-  succursale?: { id: string; nom: string }
+  role: Role
   actif: boolean
   created_at: string
 }
 
-export interface Succursale {
-  id: string
+export interface Cours {
+  id: number
   nom: string
-  ville: string
+  horaire?: string
+  duree?: string
+  professeur?: string
+  frais_inscription: number
+  frais_formation_v1: number
+  frais_formation_v2: number
   actif: boolean
   created_at: string
 }
 
-export interface Categorie {
-  id: string
+export interface Etudiant {
+  id: number
   nom: string
+  contact?: string
+  email?: string
+  date_naissance?: string
+  sexe?: 'M' | 'F'
+  adresse?: string
+  contact_urgence?: string
+  notes?: string
+  cours_id?: number
+  cours?: { nom: string }
+  frais_inscription: number
+  frais_inscription_paye: number
+  frais_formation_v1: number
+  frais_formation_v1_paye: number
+  frais_formation_v2: number
+  frais_formation_v2_paye: number
+  actif: boolean
+  created_at: string
 }
 
-export interface Produit {
-  id: string
+export interface Article {
+  id: number
   nom: string
-  categorie_id: string
-  categorie?: { nom: string }
   prix: number
   prix_achat: number
-  quantite: number
-  seuil_alerte: number
-  unite: string
-  mode_cout: 'unitaire' | 'gros'
-  prix_lot?: number | null
-  unites_par_lot?: number | null
+  type_achat: 'unitaire' | 'gros'
+  stock: number
   actif: boolean
   created_at: string
 }
 
 export interface VenteLigne {
-  produit_id: string
-  produit?: Produit
+  article_id: number
+  article_nom: string
   quantite: number
   prix_unitaire: number
-  sous_total: number
+  total: number
 }
-
-export type VenteStatut = 'completee' | 'annulee' | 'retour' | 'credit'
 
 export interface Vente {
-  id: string
-  employe_id: string
-  employe?: { nom: string }
-  succursale_id: string
-  succursale?: { nom: string }
+  id: number
+  etudiant_id?: number
+  etudiant?: { nom: string }
+  employe_id?: number
   total: number
-  statut: VenteStatut
-  notes?: string
-  nom_client?: string
-  telephone_client?: string
+  mode_paiement: 'cash' | 'credit'
   montant_paye: number
+  note?: string
   created_at: string
-  mla_ventes_lignes?: VenteLigne[]
+  usr_ventes_lignes?: VenteLigne[]
 }
 
-export interface CreditPaiement {
-  id: string
-  vente_id: string
+export interface Paiement {
+  id: number
+  etudiant_id: number
+  etudiant?: { nom: string }
+  employe_id?: number
+  type_frais: TypeFrais
   montant: number
-  date_paiement: string
-  notes?: string
+  note?: string
   created_at: string
 }
 
-export interface Fournisseur {
-  id: string
-  nom: string
-  contact?: string
-  telephone?: string
-  email?: string
-  actif: boolean
-  created_at: string
-}
-
-export interface Achat {
-  id: string
-  fournisseur_id: string
-  fournisseur?: { nom: string }
-  montant_total: number
-  notes?: string
-  statut_paiement: 'paye' | 'credit'
-  date_achat: string
-  created_at: string
-}
-
-// =============================================
-// MODULE FINANCES
-// =============================================
-
-export type DepenseCategorie =
-  | 'loyer' | 'salaires' | 'transport' | 'electricite' | 'eau' | 'stockage' | 'autres'
-
-export interface Depense {
-  id: string
-  categorie: DepenseCategorie
-  description?: string
-  montant: number
-  succursale_id?: string
-  succursale?: { nom: string }
-  date_depense: string
-  created_at: string
-}
-
-export type EmpruntStatut = 'actif' | 'rembourse'
-
-export interface Emprunt {
-  id: string
-  source: string
-  description?: string
-  montant_initial: number
-  montant_restant: number
-  date_debut: string
-  statut: EmpruntStatut
-  created_at: string
-}
-
-export interface PaiementEmprunt {
-  id: string
-  emprunt_id: string
-  montant: number
-  date_paiement: string
-  notes?: string
-  created_at: string
-}
-
-export interface Investissement {
-  id: string
-  description: string
-  montant: number
-  date_investissement: string
-  notes?: string
+export interface StockEntree {
+  id: number
+  article_id: number
+  article?: { nom: string }
+  quantite: number
+  note?: string
   created_at: string
 }

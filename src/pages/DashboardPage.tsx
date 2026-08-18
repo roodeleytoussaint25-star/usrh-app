@@ -1,380 +1,417 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
-import { Spinner } from '../components/ui/Spinner'
-import { formatHTG, formatDate, formatTime, todayStart } from '../lib/utils'
-import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
-import { AlertTriangle, TrendingUp, ArrowUpRight, ShoppingCart, Package, TrendingDown, CreditCard } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { supabase } from '@/lib/supabase'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
+} from 'recharts'
+import {
+  Users, Package, AlertTriangle, TrendingUp,
+  TrendingDown, ChevronRight, ShoppingCart, CreditCard,
+} from 'lucide-react'
+import { useCountUp } from '@/hooks/useCountUp'
+import type { Page } from '@/App'
 
-import type { Produit, Vente } from '../types'
-import type { Page } from '../App'
-import { Tooltip } from '../components/ui/Tooltip'
+interface Props { onNavigate: (page: Page) => void }
 
-interface DayData {
-  day: string
-  total: number
+interface DayData { day: string; label: string; total: number }
+
+const PERIODES = [
+  { key: 'today', label: 'Auj.' },
+  { key: '7j',   label: '7 j' },
+  { key: '30j',  label: '30 j' },
+]
+
+const JOURS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
+
+const fmtH = (n: number) => n.toLocaleString('fr-HT') + ' HTG'
+const fmtShort = (n: number) => {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k'
+  return String(n)
+}
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('fr-HT', { hour: '2-digit', minute: '2-digit' })
+
+function AlertCard({
+  icon, label, value, sub, color, onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: number
+  sub: string
+  color: 'blue' | 'red' | 'amber' | 'green'
+  onClick?: () => void
+}) {
+  const styles = {
+    blue:  { card: 'bg-[#1B2A8A] shadow-sm',                 iconBg: 'bg-white/20',       iconC: 'text-white',         val: 'text-white',        sub2: 'text-white/70',    meta: 'text-white/50'    },
+    red:   { card: 'bg-[#A01020] shadow-sm',                 iconBg: 'bg-white/20',       iconC: 'text-white',         val: 'text-white',        sub2: 'text-white/70',    meta: 'text-white/50'    },
+    amber: { card: 'bg-amber-50 border border-amber-200',   iconBg: 'bg-amber-200/60',   iconC: 'text-amber-700',     val: 'text-amber-900',    sub2: 'text-amber-700',   meta: 'text-amber-500'   },
+    green: { card: 'bg-emerald-50 border border-emerald-200', iconBg: 'bg-emerald-200/60', iconC: 'text-emerald-700', val: 'text-emerald-900',  sub2: 'text-emerald-700', meta: 'text-emerald-500' },
+  }
+  const s = styles[color]
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag onClick={onClick}
+      className={`rounded-2xl p-4 text-left transition-all active:scale-95 w-full ${s.card} ${onClick ? 'cursor-pointer' : ''}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${s.iconBg} ${s.iconC}`}>
+        {icon}
+      </div>
+      <p className={`text-3xl font-black leading-none ${s.val}`}>{value}</p>
+      <p className={`text-[11px] font-bold mt-1 leading-tight ${s.sub2}`}>{sub}</p>
+      <p className={`text-[10px] mt-0.5 ${s.meta}`}>{label}</p>
+    </Tag>
+  )
 }
 
-interface AlertProduit extends Produit {
-  categorie?: { nom: string }
-}
-
-interface DashboardPageProps {
-  onNavigate?: (page: Page) => void
-}
-
-export function DashboardPage({ onNavigate }: DashboardPageProps) {
-  const [caAujourdhui, setCaAujourdhui] = useState(0)
-  const [nbVentes, setNbVentes] = useState(0)
-  const [beneficesJour, setBeneficesJour] = useState(0)
-  const [depensesMois, setDepensesMois] = useState(0)
-  const [valeurStock, setValeurStock] = useState(0)
-  const [dettesRestantes, setDettesRestantes] = useState(0)
-  const [stockBas, setStockBas] = useState<AlertProduit[]>([])
-  const [totalProduits, setTotalProduits] = useState(0)
-  const [dernieresVentes, setDernieresVentes] = useState<Vente[]>([])
-  const [ca7Jours, setCa7Jours] = useState<DayData[]>([])
+export function DashboardPage({ onNavigate }: Props) {
+  const [periode, setPeriode] = useState('today')
+  const [caTotal, setCaTotal] = useState(0)
+  const [nbTransactions, setNbTransactions] = useState(0)
+  const [caHier, setCaHier] = useState(0)
+  const [creditsRestants, setCreditsRestants] = useState(0)
+  const [totalEtudiants, setTotalEtudiants] = useState(0)
+  const [etudiantsAvecDette, setEtudiantsAvecDette] = useState(0)
+  const [recouvrementPct, setRecouvrementPct] = useState(0)
+  const [stockRuptures, setStockRuptures] = useState(0)
+  const [caWeek, setCaWeek] = useState(0)
+  const [chartData, setChartData] = useState<DayData[]>([])
+  const [recents, setRecents] = useState<{
+    label: string; montant: number; heure: string; type: 'vente' | 'frais'; sub?: string
+  }[]>([])
   const [loading, setLoading] = useState(true)
 
+  const getRange = useCallback(() => {
+    const now = new Date()
+    let start: string
+    if (periode === 'today') {
+      const d = new Date(now); d.setHours(0, 0, 0, 0); start = d.toISOString()
+    } else if (periode === '7j') {
+      const d = new Date(now); d.setDate(d.getDate() - 7); d.setHours(0, 0, 0, 0); start = d.toISOString()
+    } else {
+      const d = new Date(now); d.setDate(d.getDate() - 30); d.setHours(0, 0, 0, 0); start = d.toISOString()
+    }
+    return { start, end: now.toISOString() }
+  }, [periode])
+
+  const loadDashboard = useCallback(async () => {
+    const { start, end } = getRange()
+
+    const hierStart = new Date(); hierStart.setDate(hierStart.getDate() - 1); hierStart.setHours(0, 0, 0, 0)
+    const hierEnd   = new Date(); hierEnd.setDate(hierEnd.getDate() - 1); hierEnd.setHours(23, 59, 59, 999)
+    const since7 = new Date(); since7.setDate(since7.getDate() - 6); since7.setHours(0, 0, 0, 0)
+
+    const [
+      ventesRes, paiementsRes,
+      ventesHierRes, paiementsHierRes,
+      ventesCreditRes,
+      etudiantsRes, articlesRes,
+      ventes7Res, paiements7Res,
+      ventesRecentRes, paiementsRecentRes,
+    ] = await Promise.all([
+      supabase.from('usr_ventes').select('montant_paye, total, mode_paiement').gte('created_at', start).lte('created_at', end),
+      supabase.from('usr_paiements').select('montant').gte('created_at', start).lte('created_at', end),
+      supabase.from('usr_ventes').select('montant_paye').gte('created_at', hierStart.toISOString()).lte('created_at', hierEnd.toISOString()),
+      supabase.from('usr_paiements').select('montant').gte('created_at', hierStart.toISOString()).lte('created_at', hierEnd.toISOString()),
+      supabase.from('usr_ventes').select('total, montant_paye').eq('mode_paiement', 'credit'),
+      supabase.from('usr_etudiants').select('frais_inscription,frais_inscription_paye,frais_formation_v1,frais_formation_v1_paye,frais_formation_v2,frais_formation_v2_paye').eq('actif', true),
+      supabase.from('usr_articles').select('stock').eq('actif', true),
+      supabase.from('usr_ventes').select('montant_paye, created_at').gte('created_at', since7.toISOString()),
+      supabase.from('usr_paiements').select('montant, created_at').gte('created_at', since7.toISOString()),
+      supabase.from('usr_ventes').select('total, created_at, etudiant:usr_etudiants(nom)').order('created_at', { ascending: false }).limit(4),
+      supabase.from('usr_paiements').select('montant, type_frais, created_at, etudiant:usr_etudiants(nom)').order('created_at', { ascending: false }).limit(4),
+    ])
+
+    // CA période
+    const ventes = ventesRes.data || []
+    const paiements = paiementsRes.data || []
+    const ca = ventes.reduce((s, v) => s + (v.montant_paye || 0), 0)
+             + paiements.reduce((s, p) => s + (p.montant || 0), 0)
+    setCaTotal(ca)
+    setNbTransactions(ventes.length + paiements.length)
+
+    // CA hier
+    const ch = (ventesHierRes.data || []).reduce((s, v) => s + (v.montant_paye || 0), 0)
+             + (paiementsHierRes.data || []).reduce((s, p) => s + (p.montant || 0), 0)
+    setCaHier(ch)
+
+    // Crédits restants
+    setCreditsRestants((ventesCreditRes.data || []).reduce((s, v) => s + Math.max(0, (v.total || 0) - (v.montant_paye || 0)), 0))
+
+    // Étudiants frais
+    const etus = etudiantsRes.data || []
+    let totalDu = 0, totalPercu = 0, avecDette = 0
+    for (const e of etus) {
+      totalDu += (e.frais_inscription || 0) + (e.frais_formation_v1 || 0) + (e.frais_formation_v2 || 0)
+      totalPercu += (e.frais_inscription_paye || 0) + (e.frais_formation_v1_paye || 0) + (e.frais_formation_v2_paye || 0)
+      const dette = Math.max(0, e.frais_inscription - e.frais_inscription_paye)
+               + Math.max(0, e.frais_formation_v1 - e.frais_formation_v1_paye)
+               + Math.max(0, e.frais_formation_v2 - e.frais_formation_v2_paye)
+      if (dette > 0) avecDette++
+    }
+    setTotalEtudiants(etus.length)
+    setEtudiantsAvecDette(avecDette)
+    setRecouvrementPct(totalDu > 0 ? Math.round((totalPercu / totalDu) * 100) : 100)
+
+    // Stock
+    setStockRuptures((articlesRes.data || []).filter(a => a.stock <= 0).length)
+
+    // Chart 7 jours
+    const days: DayData[] = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i)); d.setHours(0, 0, 0, 0)
+      return { day: JOURS[d.getDay()], label: `${d.getDate()}/${d.getMonth() + 1}`, total: 0 }
+    })
+    const dateKey = (iso: string) => {
+      const d = new Date(iso); d.setHours(0, 0, 0, 0); return d.toDateString()
+    }
+    const dayDates = days.map((_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i)); d.setHours(0, 0, 0, 0)
+      return d.toDateString()
+    })
+    for (const v of (ventes7Res.data || [])) {
+      const idx = dayDates.indexOf(dateKey(v.created_at))
+      if (idx >= 0) days[idx].total += v.montant_paye || 0
+    }
+    for (const p of (paiements7Res.data || [])) {
+      const idx = dayDates.indexOf(dateKey(p.created_at))
+      if (idx >= 0) days[idx].total += p.montant || 0
+    }
+    setChartData(days)
+    setCaWeek(days.reduce((s, d) => s + d.total, 0))
+
+    // Recents
+    const FLABELS: Record<string, string> = {
+      inscription: 'Inscription',
+      formation_v1: 'Formation V1',
+      formation_v2: 'Formation V2',
+    }
+    const rv = (ventesRecentRes.data || []).map((v: any) => {
+      const nom = Array.isArray(v.etudiant) ? v.etudiant[0]?.nom : v.etudiant?.nom
+      return { label: nom || 'Caisse', montant: v.total, heure: v.created_at, type: 'vente' as const }
+    })
+    const rp = (paiementsRecentRes.data || []).map((p: any) => {
+      const nom = Array.isArray(p.etudiant) ? p.etudiant[0]?.nom : p.etudiant?.nom
+      return { label: nom || '—', montant: p.montant, heure: p.created_at, type: 'frais' as const, sub: FLABELS[p.type_frais] }
+    })
+    setRecents([...rv, ...rp].sort((a, b) => new Date(b.heure).getTime() - new Date(a.heure).getTime()).slice(0, 6))
+    setLoading(false)
+  }, [getRange])
+
   useEffect(() => {
+    setLoading(true)
     loadDashboard()
-    const interval = setInterval(() => loadDashboard(true), 60000)
-    return () => clearInterval(interval)
-  }, [])
+    const t = setInterval(loadDashboard, 60_000)
+    return () => clearInterval(t)
+  }, [loadDashboard])
 
-  const loadDashboard = async (isRefresh = false) => {
-    if (!isRefresh) setLoading(true)
-    const todayStr = todayStart()
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
-    const tomorrowStr = tomorrow.toISOString()
+  const caChange = caHier > 0 ? Math.round(((caTotal - caHier) / caHier) * 100) : null
+  const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 
-    const { data: ventesAuj } = await supabase
-      .from('mla_ventes')
-      .select('total, employe_id, mla_employes(nom)')
-      .gte('created_at', todayStr)
-      .lt('created_at', tomorrowStr)
+  const displayCA = useCountUp(caTotal)
+  const displayEtus = useCountUp(totalEtudiants)
+  const displayDette = useCountUp(etudiantsAvecDette)
+  const displayRecouvrement = useCountUp(recouvrementPct)
+  const displayRuptures = useCountUp(stockRuptures)
+  const displayWeek = useCountUp(caWeek)
 
-    if (ventesAuj) {
-      const total = (ventesAuj as Array<{ total: number }>).reduce((acc, v) => acc + (v.total || 0), 0)
-      setCaAujourdhui(total)
-      setNbVentes(ventesAuj.length)
-    }
-
-    // Dépenses du mois en cours
-    const debutMois = new Date()
-    debutMois.setDate(1)
-    debutMois.setHours(0, 0, 0, 0)
-    const debutMoisStr = debutMois.toISOString().split('T')[0]
-    const [{ data: depMois }, { data: achatsMois }] = await Promise.all([
-      supabase.from('mla_depenses').select('montant').gte('date_depense', debutMoisStr),
-      supabase.from('mla_achats').select('montant_total, statut_paiement').gte('date_achat', debutMoisStr),
-    ])
-    const totalDepMois = (depMois || []).reduce((s: number, d: { montant: number }) => s + d.montant, 0)
-    const totalAchatsPaye = (achatsMois || [])
-      .filter((a: { statut_paiement: string }) => a.statut_paiement === 'paye')
-      .reduce((s: number, a: { montant_total: number }) => s + a.montant_total, 0)
-    setDepensesMois(totalDepMois + totalAchatsPaye)
-
-    // Bénéfices jour = CA - coût d'achat des produits vendus aujourd'hui
-    const venteIdsAuj = (ventesAuj || []).map((v: any) => v.id).filter(Boolean)
-    let coutAchat = 0
-    if (venteIdsAuj.length > 0) {
-      const { data: lignesAuj } = await supabase
-        .from('mla_ventes_lignes')
-        .select('quantite, mla_produits(prix_achat)')
-        .in('vente_id', venteIdsAuj)
-      coutAchat = (lignesAuj || []).reduce((s: number, l: any) => {
-        const pa = Array.isArray(l.mla_produits) ? (l.mla_produits[0]?.prix_achat || 0) : (l.mla_produits?.prix_achat || 0)
-        return s + (l.quantite || 0) * pa
-      }, 0)
-    }
-    setBeneficesJour(Math.max(0, (ventesAuj || []).reduce((acc: number, v: any) => acc + (v.total || 0), 0) - coutAchat))
-
-    // Dettes restantes = emprunts actifs + achats fournisseurs à crédit
-    const [{ data: emprunts }, { data: achatsCredit }] = await Promise.all([
-      supabase.from('mla_emprunts').select('montant_restant').eq('statut', 'actif'),
-      supabase.from('mla_achats').select('montant_total').eq('statut_paiement', 'credit'),
-    ])
-    const totalEmprunts = (emprunts || []).reduce((s: number, e: { montant_restant: number }) => s + e.montant_restant, 0)
-    const totalAchatsCredit = (achatsCredit || []).reduce((s: number, a: { montant_total: number }) => s + a.montant_total, 0)
-    setDettesRestantes(totalEmprunts + totalAchatsCredit)
-
-    const { data: allProduits } = await supabase
-      .from('mla_produits')
-      .select('*, categorie:mla_categories(nom)')
-      .eq('actif', true)
-
-    if (allProduits) {
-      setTotalProduits(allProduits.length)
-      setStockBas(allProduits.filter((p: Produit) => p.quantite <= p.seuil_alerte))
-      const vStock = allProduits.reduce((s: number, p: Produit) => s + p.quantite * (p.prix_achat || 0), 0)
-      setValeurStock(vStock)
-    }
-
-    const { data: lastVentes } = await supabase
-      .from('mla_ventes')
-      .select('*, employe:mla_employes(nom)')
-      .order('created_at', { ascending: false })
-      .limit(5)
-
-    if (lastVentes) setDernieresVentes(lastVentes as Vente[])
-
-    const dayLabels = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
-    const days7 = []
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      d.setHours(0, 0, 0, 0)
-      const next = new Date(d)
-      next.setDate(next.getDate() + 1)
-      const { data } = await supabase
-        .from('mla_ventes')
-        .select('total')
-        .gte('created_at', d.toISOString())
-        .lt('created_at', next.toISOString())
-      days7.push({ day: dayLabels[d.getDay()], total: (data || []).reduce((a: number, v: { total: number }) => a + (v.total || 0), 0) })
-    }
-    setCa7Jours(days7)
-    if (!isRefresh) setLoading(false)
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Spinner size="lg" />
+  if (loading) return (
+    <div className="p-4 space-y-4 pb-24">
+      <div className="h-10 bg-gray-100 rounded-xl animate-pulse" />
+      <div className="h-44 bg-[#1B2A8A]/20 rounded-2xl animate-pulse" />
+      <div className="grid grid-cols-2 gap-3">
+        {[0, 1, 2, 3].map(i => <div key={i} className="h-28 bg-gray-200 rounded-2xl animate-pulse" />)}
       </div>
-    )
-  }
-
-  const maxBar = Math.max(...ca7Jours.map(d => d.total), 1)
+      <div className="h-56 bg-white rounded-2xl animate-pulse" />
+    </div>
+  )
 
   return (
-    <div className="p-5 space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
+    <div className="p-4 space-y-4 pb-24 max-w-5xl mx-auto">
+
+      {/* Header + sélecteur période */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-bold text-gray-800 capitalize">{dateLabel}</p>
+          <p className="text-xs text-gray-400">USRH</p>
+        </div>
+        <div className="flex gap-1 bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
+          {PERIODES.map(p => (
+            <button key={p.key} onClick={() => setPeriode(p.key)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                periode === p.key ? 'bg-[#1B2A8A] text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'
+              }`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Hero CA */}
+      <div className="bg-[#1B2A8A] rounded-2xl p-5 text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: 'radial-gradient(circle at 85% 15%, white 0%, transparent 55%)' }} />
+        <div className="relative">
+          <p className="text-xs font-semibold text-blue-300 uppercase tracking-widest">
+            Chiffre d'affaires
+          </p>
+          <p className="text-[11px] text-white/40 mb-3">
+            {periode === 'today' ? "Aujourd'hui" : periode === '7j' ? '7 derniers jours' : '30 derniers jours'}
+          </p>
+          <p className="text-5xl font-black tracking-tight leading-none mb-3">
+            {fmtShort(displayCA)}{' '}
+            <span className="text-xl font-medium text-white/40">HTG</span>
+          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 text-sm">
+              <ShoppingCart size={13} className="text-white/50" />
+              <span className="font-semibold">{nbTransactions}</span>
+              <span className="text-white/50 text-xs">transaction{nbTransactions !== 1 ? 's' : ''}</span>
+            </div>
+            {caChange !== null && periode === 'today' && (
+              <div className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${
+                caChange >= 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-400/20 text-red-300'
+              }`}>
+                {caChange >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                {caChange > 0 ? '+' : ''}{caChange}% vs hier
+              </div>
+            )}
+            {creditsRestants > 0 && (
+              <div className="flex items-center gap-1.5 text-xs">
+                <CreditCard size={12} className="text-white/50" />
+                <span className="font-semibold text-amber-300">{fmtShort(creditsRestants)}</span>
+                <span className="text-white/40">à encaisser</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Cartes alertes 2×2 */}
       <div>
-        <h1 className="text-2xl font-black tracking-tight text-[#1A1210]">Tableau de bord</h1>
-        <p className="text-sm text-[#78726A] mt-0.5">Vue d'ensemble de votre commerce d'intrants</p>
-        <div className="w-10 h-0.5 bg-[#8B6400] rounded-full mt-1 mb-0.5" />
-        <p className="text-[11px] text-[#A09589] capitalize">{formatDate(new Date().toISOString())}</p>
-      </div>
-
-      {/* Stats — row 1 : CA + Bénéfices + Ventes */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Hero card — CA */}
-        <div className="rounded-xl p-4 text-white relative overflow-hidden shadow-lg" style={{background: 'linear-gradient(135deg, #2D6B2D 0%, #3DAA35 100%)'}}>
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-white/60">CA Aujourd'hui</p>
-            <Tooltip text="Voir les rapports" side="left">
-              <button
-                onClick={() => onNavigate?.('rapports')}
-                className="w-6 h-6 bg-white/15 rounded-full flex items-center justify-center hover:bg-white/25 transition-colors"
-              >
-                <ArrowUpRight size={13} className="text-white" />
-              </button>
-            </Tooltip>
-          </div>
-          <p className="text-2xl font-bold leading-none mb-2">{formatHTG(caAujourdhui)}</p>
-          <div className="flex items-center gap-1">
-            <TrendingUp size={11} className="text-white/60" />
-            <p className="text-[10px] text-white/60">Mis à jour maintenant</p>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-white/10 rounded-full" />
-          <div className="absolute -right-1 -bottom-8 w-14 h-14 bg-white/10 rounded-full" />
-        </div>
-
-        {/* Bénéfices */}
-        <div className="bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 border-l-[#F59E0B] shadow-sm">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-amber-700">Bénéfices</p>
-            <div className="w-6 h-6 bg-amber-100 rounded-full flex items-center justify-center">
-              <TrendingUp size={13} className="text-amber-600" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-amber-600 leading-none mb-2">{formatHTG(beneficesJour)}</p>
-          <p className="text-[10px] text-amber-500">Après coût d'achat</p>
-        </div>
-
-        {/* Ventes */}
-        <div className="bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 border-l-[#3DAA35] shadow-sm">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-[#78726A]">Ventes du jour</p>
-            <div className="w-6 h-6 bg-[#EEF7EE] rounded-full flex items-center justify-center">
-              <ShoppingCart size={13} className="text-[#3DAA35]" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-[#2C2420] leading-none mb-2">{nbVentes}</p>
-          <p className="text-[10px] text-[#A09589]">transactions</p>
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1 mb-3">
+          Vue opérationnelle
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <AlertCard
+            icon={<Users size={17} />}
+            label="Étudiants"
+            value={displayEtus}
+            sub="inscrits actifs"
+            color="blue"
+            onClick={() => onNavigate('etudiants')}
+          />
+          <AlertCard
+            icon={<AlertTriangle size={17} />}
+            label="Dettes frais"
+            value={displayDette}
+            sub={etudiantsAvecDette > 0 ? 'avec solde dû' : 'tout à jour'}
+            color={etudiantsAvecDette > 0 ? 'red' : 'green'}
+            onClick={() => onNavigate('etudiants')}
+          />
+          <AlertCard
+            icon={<TrendingUp size={17} />}
+            label="Recouvrement"
+            value={displayRecouvrement}
+            sub="% des frais perçus"
+            color={recouvrementPct >= 80 ? 'green' : recouvrementPct >= 50 ? 'amber' : 'red'}
+          />
+          <AlertCard
+            icon={<Package size={17} />}
+            label="Stock"
+            value={displayRuptures}
+            sub={stockRuptures > 0 ? 'rupture(s)' : 'tout en stock'}
+            color={stockRuptures > 0 ? 'amber' : 'green'}
+            onClick={() => onNavigate('stock')}
+          />
         </div>
       </div>
 
-      {/* Stats — row 2 : Dépenses + Stock + Dettes + Alertes */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 border-l-[#DC2626] shadow-sm">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-red-700">Dépenses (mois)</p>
-            <div className="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center">
-              <TrendingDown size={13} className="text-red-500" />
-            </div>
+      {/* Line chart CA 7 jours */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div className="flex items-start justify-between mb-1">
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">Chiffre d'affaires</h3>
+            <p className="text-[11px] text-gray-400">7 derniers jours</p>
           </div>
-          <p className="text-xl font-bold text-red-600 leading-none mb-1">{formatHTG(depensesMois)}</p>
-          <p className="text-[10px] text-red-400">Ce mois-ci</p>
-        </div>
-
-        <div className="bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 border-l-emerald-400 shadow-sm">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-[#78726A]">Valeur stock</p>
-            <div className="w-6 h-6 bg-[#F0EBE0] rounded-full flex items-center justify-center">
-              <Package size={13} className="text-[#78726A]" />
-            </div>
+          <div className="text-right">
+            <p className="text-lg font-black text-[#1B2A8A]">{fmtShort(displayWeek)}</p>
+            <p className="text-[10px] text-gray-400">total semaine</p>
           </div>
-          <p className="text-xl font-bold text-[#2C2420] leading-none mb-1">{formatHTG(valeurStock)}</p>
-          <p className="text-[10px] text-[#A09589]">{totalProduits} produits</p>
         </div>
-
-        <div className="bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 border-l-[#F59E0B] shadow-sm">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-xs font-medium text-[#78726A]">Dettes restantes</p>
-            <div className="w-6 h-6 bg-amber-50 rounded-full flex items-center justify-center">
-              <CreditCard size={13} className="text-amber-500" />
-            </div>
-          </div>
-          <p className={`text-xl font-bold leading-none mb-1 ${dettesRestantes > 0 ? 'text-amber-600' : 'text-[#2C2420]'}`}>
-            {formatHTG(dettesRestantes)}
-          </p>
-          <p className="text-[10px] text-[#A09589]">{dettesRestantes > 0 ? 'Emprunts actifs' : 'Aucune dette'}</p>
-        </div>
-
-        <div className={`bg-white rounded-xl p-4 border border-[#D4CAB8] border-l-4 shadow-sm ${
-          stockBas.length > 0 ? 'border-l-[#DC2626]' : 'border-l-green-500'
-        }`}>
-          <div className="flex items-start justify-between mb-2">
-            <p className={`text-xs font-medium ${stockBas.length > 0 ? 'text-red-700' : 'text-green-700'}`}>Alertes stock</p>
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${stockBas.length > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
-              <AlertTriangle size={13} className={stockBas.length > 0 ? 'text-red-500' : 'text-green-500'} />
-            </div>
-          </div>
-          <p className={`text-xl font-bold leading-none mb-1 ${stockBas.length > 0 ? 'text-red-600' : 'text-green-700'}`}>
-            {stockBas.length}
-          </p>
-          <p className={`text-[10px] ${stockBas.length > 0 ? 'text-red-400' : 'text-green-600'}`}>
-            {stockBas.length > 0 ? 'à réapprovisionner' : 'Tout est OK'}
-          </p>
-        </div>
-      </div>
-
-      {/* Row 2 — Chart + Last vente */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Bar chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-[#D4CAB8] p-5 shadow-sm">
-          <div className="mb-4">
-            <h3 className="text-sm font-semibold text-[#2C2420] flex items-center gap-2">
-              <span className="w-1 h-4 bg-[#3DAA35] rounded-full" />
-              CA des 7 derniers jours
-            </h3>
-            <p className="text-xs text-[#A09589] mt-0.5 ml-3">Évolution de vos ventes sur la semaine</p>
-          </div>
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={ca7Jours} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <RechartsTooltip
-                formatter={(value) => [formatHTG(Number(value)), 'CA']}
-                contentStyle={{ fontSize: 12, borderRadius: 10, border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-              />
-              <Bar
-                dataKey="total"
-                fill="#3DAA35"
-                radius={[3, 3, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Last vente card — blue gradient */}
-        {dernieresVentes.length > 0 ? (
-          <div className="rounded-xl p-5 text-white flex flex-col justify-between relative overflow-hidden shadow-lg" style={{background: 'linear-gradient(135deg, #2D6B2D 0%, #3DAA35 100%)'}}>
-            <div>
-              <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-3">Dernière vente</p>
-              <p className="text-lg font-bold leading-tight mb-1">
-                {dernieresVentes[0].nom_client || 'Client de passage'}
-              </p>
-              <p className="text-xs text-white/60">{formatTime(dernieresVentes[0].created_at)}</p>
-            </div>
-            <div className="mt-4">
-              <p className="text-2xl font-bold">{formatHTG(dernieresVentes[0].total)}</p>
-            </div>
-            <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-white/10 rounded-full" />
-            <div className="absolute -right-2 -top-6 w-16 h-16 bg-white/10 rounded-full" />
+        {chartData.every(d => d.total === 0) ? (
+          <div className="flex flex-col items-center py-10">
+            <TrendingUp size={28} className="text-gray-200 mb-2" />
+            <p className="text-sm text-gray-400">Pas encore de transactions</p>
           </div>
         ) : (
-          <div className="rounded-xl p-5 text-white flex flex-col items-center justify-center shadow-lg" style={{background: 'linear-gradient(135deg, #2D6B2D 0%, #3DAA35 100%)'}}>
-            <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center mb-3">
-              <ShoppingCart size={24} className="text-white" />
-            </div>
-            <p className="text-sm text-white/60 text-center">Aucune vente enregistrée aujourd'hui</p>
-          </div>
+          <ResponsiveContainer width="100%" height={150}>
+            <LineChart data={chartData} margin={{ top: 8, right: 4, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false}
+                tickFormatter={v => v === 0 ? '0' : `${Math.round(v / 1000)}k`} />
+              <Tooltip
+                formatter={(value) => [fmtH(Number(value)), 'CA']}
+                labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                contentStyle={{ fontSize: 12, borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+              />
+              <Line type="monotone" dataKey="total" stroke="#A01020" strokeWidth={2.5}
+                dot={(props: any) => {
+                  const isToday = props.index === 6
+                  return (
+                    <circle key={props.index} cx={props.cx} cy={props.cy}
+                      r={isToday ? 5 : 3}
+                      fill={isToday ? '#A01020' : '#fff'}
+                      stroke="#A01020" strokeWidth={2} />
+                  )
+                }}
+                activeDot={{ r: 6, fill: '#A01020', stroke: '#fff', strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         )}
       </div>
 
-      {/* Alertes stock */}
-      {stockBas.length > 0 && (
-        <div className="bg-white rounded-xl border border-[#D4CAB8] p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[#2C2420] flex items-center gap-2">
-                <span className="w-1 h-4 bg-[#DC2626] rounded-full" />
-                Stock bas
-              </h3>
-              <p className="text-xs text-[#A09589] mt-0.5 ml-3">Produits à réapprovisionner en priorité</p>
+      {/* Transactions récentes */}
+      {recents.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={15} className="text-[#1B2A8A]" />
+              <h3 className="text-sm font-bold text-gray-800">Transactions récentes</h3>
             </div>
-            <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">
-              {stockBas.length}
-            </span>
+            <button onClick={() => onNavigate('ventes')}
+              className="text-[11px] text-[#1B2A8A] font-semibold flex items-center gap-0.5">
+              Tout voir <ChevronRight size={13} />
+            </button>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-            {stockBas.slice(0, 8).map(p => (
-              <div key={p.id} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2">
-                <p className="text-xs font-semibold text-[#4A4540] truncate">{p.nom}</p>
-                <span className="text-xs font-bold text-red-500 ml-2 flex-shrink-0">{p.quantite}</span>
+          {recents.map((r, i) => (
+            <div key={i}
+              className={`flex items-center gap-3 px-4 py-3 ${i < recents.length - 1 ? 'border-b border-gray-50' : ''}`}>
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                r.type === 'frais' ? 'bg-[#1B2A8A]/10' : 'bg-gray-100'
+              }`}>
+                {r.type === 'frais'
+                  ? <CreditCard size={13} className="text-[#1B2A8A]" />
+                  : <ShoppingCart size={13} className="text-gray-400" />
+                }
               </div>
-            ))}
-          </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800 truncate">{r.label}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    r.type === 'frais' ? 'bg-[#1B2A8A]/10 text-[#1B2A8A]' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {r.type === 'frais' ? (r.sub || 'Frais') : 'Produit'}
+                  </span>
+                  <span className="text-[10px] text-gray-400">{fmtTime(r.heure)}</span>
+                </div>
+              </div>
+              <p className="text-sm font-black text-gray-800 flex-shrink-0">{fmtH(r.montant)}</p>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Dernières ventes list */}
-      <div className="bg-white rounded-xl border border-[#D4CAB8] p-5 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-sm font-semibold text-[#2C2420] flex items-center gap-2">
-            <span className="w-1 h-4 bg-[#3DAA35] rounded-full" />
-            Dernières ventes
-          </h3>
-          <p className="text-xs text-[#A09589] mt-0.5 ml-3">Dernières transactions enregistrées</p>
-        </div>
-        {dernieresVentes.length === 0 ? (
-          <p className="text-sm text-[#A09589]">Aucune vente enregistrée</p>
-        ) : (
-          <div className="space-y-0">
-            {dernieresVentes.map((v, i) => (
-              <div key={v.id} className={`flex items-center justify-between py-3 ${i < dernieresVentes.length - 1 ? 'border-b border-[#D4CAB8]' : ''}`}>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-[#EEF7EE] rounded-full flex items-center justify-center flex-shrink-0">
-                    <ShoppingCart size={14} className="text-[#3DAA35]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-[#4A4540]">
-                      {v.nom_client || 'Client de passage'}
-                    </p>
-                    <p className="text-xs text-[#A09589]">{formatTime(v.created_at)}</p>
-                  </div>
-                </div>
-                <span className="text-sm font-bold text-[#F59E0B]">{formatHTG(v.total)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

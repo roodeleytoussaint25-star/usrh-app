@@ -1,474 +1,445 @@
-import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../lib/supabase'
-import { Spinner } from '../components/ui/Spinner'
-import { formatHTG } from '../lib/utils'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 import {
-  TrendingUp, TrendingDown, Package, Truck, CreditCard,
-  AlertTriangle, Filter, Calendar,
+  ChevronDown, GraduationCap, Package, TrendingUp,
+  Search, Phone, X, CreditCard, Mail, MapPin, AlertCircle, StickyNote, CheckCircle,
 } from 'lucide-react'
-import {
-  BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
-} from 'recharts'
-import { CreditTab } from '../components/CreditTab'
 
-// ── Helpers dates ─────────────────────────────────────────────────────────────
+type MainTab = 'etudiants' | 'finances'
+type Period  = '7j' | '30j' | 'mois' | 'tout'
+type SubTab  = 'frais' | 'ventes' | 'credits'
+type Filter  = 'tous' | 'dettes' | 'ajour'
 
-function subDays(n: number): Date {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  d.setHours(0, 0, 0, 0)
-  return d
+interface Props {
+  onPayEtudiant: (id: number) => void
 }
 
-function startOfDay(d: Date): Date {
-  const r = new Date(d)
-  r.setHours(0, 0, 0, 0)
-  return r
+interface Etudiant {
+  id: number
+  nom: string
+  contact?: string
+  email?: string
+  date_naissance?: string
+  sexe?: 'M' | 'F'
+  adresse?: string
+  contact_urgence?: string
+  notes?: string
+  cours_id?: number
+  cours_nom?: string
+  frais_inscription: number
+  frais_inscription_paye: number
+  frais_formation_v1: number
+  frais_formation_v1_paye: number
+  frais_formation_v2: number
+  frais_formation_v2_paye: number
+  dette: number
+  created_at: string
 }
 
-function endOfDay(d: Date): Date {
-  const r = new Date(d)
-  r.setHours(23, 59, 59, 999)
-  return r
+const PERIOD_LABELS: Record<Period, string> = {
+  '7j': '7 derniers jours', '30j': '30 derniers jours',
+  'mois': 'Ce mois', 'tout': 'Tout',
 }
 
-const DAY_NAMES = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
-const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
-
-function fmtDay(d: Date) { return DAY_NAMES[d.getDay()] }
-function fmtDDMM(d: Date) { return `${d.getDate()}/${d.getMonth() + 1}` }
-function fmtMonth(d: Date) { return MONTH_NAMES[d.getMonth()] }
-
-interface Bucket { label: string; start: Date; end: Date }
-
-function getBuckets(startDate: Date, endDate: Date): Bucket[] {
-  const diffMs = endDate.getTime() - startDate.getTime()
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
-
-  const buckets: Bucket[] = []
-
-  if (diffDays <= 8) {
-    for (let i = 0; i <= diffDays; i++) {
-      const d = new Date(startDate)
-      d.setDate(d.getDate() + i)
-      buckets.push({ label: fmtDay(d), start: startOfDay(d), end: endOfDay(d) })
-    }
-  } else if (diffDays <= 32) {
-    for (let i = 0; i <= diffDays; i++) {
-      const d = new Date(startDate)
-      d.setDate(d.getDate() + i)
-      buckets.push({ label: fmtDDMM(d), start: startOfDay(d), end: endOfDay(d) })
-    }
-  } else if (diffDays <= 100) {
-    // Semaines
-    const cur = new Date(startDate)
-    while (cur <= endDate) {
-      const wEnd = new Date(cur)
-      wEnd.setDate(wEnd.getDate() + 6)
-      wEnd.setHours(23, 59, 59, 999)
-      buckets.push({
-        label: fmtDDMM(cur),
-        start: new Date(cur),
-        end: wEnd > endDate ? endDate : wEnd,
-      })
-      cur.setDate(cur.getDate() + 7)
-    }
-  } else {
-    // Mois
-    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
-    while (cur <= endDate) {
-      const mEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0, 23, 59, 59, 999)
-      buckets.push({
-        label: fmtMonth(cur),
-        start: new Date(cur),
-        end: mEnd > endDate ? endDate : mEnd,
-      })
-      cur.setMonth(cur.getMonth() + 1)
-    }
-  }
-
-  return buckets
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface VenteRaw { created_at: string; total: number }
-interface VenteLigneRaw { produit_id: string; quantite: number; prix_unitaire: number; sous_total: number; mla_produits: { nom: string; prix_achat: number } | null }
-interface AchatRaw { created_at: string; montant_total: number; mla_fournisseurs: { nom: string } | null }
-interface DepenseRaw { date_depense: string; montant: number }
-interface ProduitRaw { id: string; prix_achat: number }
-
-type Tab = 'tendances' | 'produits' | 'fournisseurs' | 'credits'
-
-const PERIODES = [
-  { key: 'today',   label: "Aujourd'hui", days: 0 },
-  { key: '7days',   label: '7 derniers jours', days: 7 },
-  { key: '30days',  label: '30 derniers jours', days: 30 },
-  { key: '3months', label: '3 mois', days: 90 },
-  { key: 'year',    label: 'Cette année', days: 365 },
+const FRAIS_ROWS = [
+  { label: 'Inscription',  total: 'frais_inscription',  paye: 'frais_inscription_paye'  },
+  { label: 'Formation V1', total: 'frais_formation_v1', paye: 'frais_formation_v1_paye' },
+  { label: 'Formation V2', total: 'frais_formation_v2', paye: 'frais_formation_v2_paye' },
 ]
 
-// ── Composant KPI ─────────────────────────────────────────────────────────────
+const fmt = (n: number) => n.toLocaleString('fr-HT') + ' HTG'
 
-function KpiCard({ title, value, sub, color, icon, negative }:
-  { title: string; value: string; sub?: string; color: string; icon: React.ReactNode; negative?: boolean }) {
-  return (
-    <div className="bg-white rounded-xl border border-[#D4CAB8] p-3.5 shadow-sm">
-      <div className="flex items-start justify-between mb-1.5">
-        <p className="text-xs font-medium text-[#78726A]">{title}</p>
-        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${color}`}>
-          {icon}
-        </div>
-      </div>
-      <p className={`text-xl font-black leading-tight ${negative ? 'text-red-600' : 'text-[#2C2420]'}`}>
-        {value}
-      </p>
-      {sub && <p className="text-[10px] text-[#A09589] mt-0.5">{sub}</p>}
-    </div>
-  )
-}
+export function RapportsPage({ onPayEtudiant }: Props) {
+  const [mainTab, setMainTab] = useState<MainTab>('etudiants')
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+  // ── Étudiants ──
+  const [etudiants, setEtudiants]     = useState<Etudiant[]>([])
+  const [etuLoading, setEtuLoading]   = useState(true)
+  const [search, setSearch]           = useState('')
+  const [filter, setFilter]           = useState<Filter>('tous')
+  const [selected, setSelected]       = useState<Etudiant | null>(null)
+  const [history, setHistory]         = useState<{ type_frais: string; montant: number; created_at: string }[]>([])
+  const [histLoading, setHistLoading] = useState(false)
 
-export function RapportsPage() {
-  const [periode, setPeriode] = useState('7days')
-  const [periodeOpen, setPeriodeOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('tendances')
-  const [loading, setLoading] = useState(true)
+  // ── Finances ──
+  const [period, setPeriod]       = useState<Period>('7j')
+  const [showPicker, setShowPicker] = useState(false)
+  const [subTab, setSubTab]       = useState<SubTab>('frais')
+  const [finLoading, setFinLoading] = useState(true)
 
-  const [ventes, setVentes] = useState<VenteRaw[]>([])
-  const [lignes, setLignes] = useState<VenteLigneRaw[]>([])
-  const [achats, setAchats] = useState<AchatRaw[]>([])
-  const [depenses, setDepenses] = useState<DepenseRaw[]>([])
-  const [produitsSansCout, setProduitsSansCout] = useState(0)
+  const [fraisPercus, setFraisPercus] = useState(0)
+  const [caVentes, setCaVentes]       = useState(0)
+  const [nbVentes, setNbVentes]       = useState(0)
+  const [creances, setCreances]       = useState(0)
+  const [nbCredits, setNbCredits]     = useState(0)
+  const [dettesEtu, setDettesEtu]     = useState(0)
+  const [nbEtuDette, setNbEtuDette]   = useState(0)
+  const [fraisBreak, setFraisBreak]   = useState<{ label: string; type: string; montant: number }[]>([])
+  const [topArticles, setTopArticles] = useState<{ nom: string; qty: number; total: number }[]>([])
+  const [creditsData, setCreditsData] = useState<{ nom: string; dette: number }[]>([])
 
-  const periodeLabel = PERIODES.find(p => p.key === periode)?.label || ''
+  useEffect(() => { loadEtudiants() }, [])
+  useEffect(() => { if (mainTab === 'finances') loadFinances() }, [mainTab, period])
 
-  const { startDate, endDate } = useMemo(() => {
-    const now = new Date()
-    if (periode === 'today') {
-      return { startDate: startOfDay(now), endDate: endOfDay(now) }
-    }
-    const days = PERIODES.find(p => p.key === periode)?.days || 7
-    return { startDate: subDays(days), endDate: now }
-  }, [periode])
-
-  useEffect(() => { loadData() }, [periode])
-
-  const loadData = async () => {
-    setLoading(true)
-    const now = new Date()
-    const sd = periode === 'today' ? startOfDay(now) : subDays(PERIODES.find(p => p.key === periode)?.days || 7)
-
-    const [{ data: v }, { data: a }, { data: dep }, { data: prods }] = await Promise.all([
-      supabase.from('mla_ventes').select('id, created_at, total').gte('created_at', sd.toISOString()).neq('statut', 'annulee'),
-      supabase.from('mla_achats').select('created_at, montant_total, mla_fournisseurs(nom)').gte('created_at', sd.toISOString()),
-      supabase.from('mla_depenses').select('date_depense, montant').gte('date_depense', sd.toISOString().split('T')[0]),
-      supabase.from('mla_produits').select('id, prix_achat').eq('actif', true),
-    ])
-
-    const venteIds = (v || []).map((x: Record<string, unknown>) => (x as { id?: string }).id).filter(Boolean)
-    let l: VenteLigneRaw[] = []
-    if (venteIds.length > 0) {
-      // Fetch lignes for CMV calculation
-      const { data: lData } = await supabase
-        .from('mla_ventes_lignes')
-        .select('produit_id, quantite, prix_unitaire, sous_total, mla_produits(nom, prix_achat)')
-        .in('vente_id', venteIds)
-      l = (lData || []) as unknown as VenteLigneRaw[]
-    }
-
-    setVentes((v || []) as VenteRaw[])
-    setLignes(l)
-    setAchats((a || []) as unknown as AchatRaw[])
-    setDepenses((dep || []) as DepenseRaw[])
-    setProduitsSansCout((prods || []).filter((p: ProduitRaw) => !p.prix_achat || p.prix_achat === 0).length)
-    setLoading(false)
+  const loadEtudiants = async () => {
+    setEtuLoading(true)
+    const { data } = await supabase
+      .from('usr_etudiants')
+      .select('id, nom, contact, email, date_naissance, sexe, adresse, contact_urgence, notes, cours_id, cours:usr_cours(nom), frais_inscription, frais_inscription_paye, frais_formation_v1, frais_formation_v1_paye, frais_formation_v2, frais_formation_v2_paye, created_at')
+      .eq('actif', true)
+      .order('nom')
+    const liste: Etudiant[] = (data || []).map((e: any) => {
+      const dette =
+        Math.max(0, (e.frais_inscription  || 0) - (e.frais_inscription_paye  || 0)) +
+        Math.max(0, (e.frais_formation_v1 || 0) - (e.frais_formation_v1_paye || 0)) +
+        Math.max(0, (e.frais_formation_v2 || 0) - (e.frais_formation_v2_paye || 0))
+      return {
+        ...e,
+        cours_nom: Array.isArray(e.cours) ? e.cours[0]?.nom : e.cours?.nom,
+        dette,
+      }
+    })
+    setEtudiants(liste)
+    setEtuLoading(false)
   }
 
-  // ── Totaux ──────────────────────────────────────────────────────────────────
+  const openDetail = async (e: Etudiant) => {
+    setSelected(e)
+    setHistLoading(true)
+    const { data } = await supabase
+      .from('usr_paiements')
+      .select('type_frais, montant, created_at')
+      .eq('etudiant_id', e.id)
+      .order('created_at', { ascending: false })
+      .limit(10)
+    setHistory(data || [])
+    setHistLoading(false)
+  }
 
-  const caTotal = useMemo(() => ventes.reduce((a, v) => a + (v.total || 0), 0), [ventes])
-  const totalAchats = useMemo(() => achats.reduce((a, x) => a + (x.montant_total || 0), 0), [achats])
-  const totalDepenses = useMemo(() => depenses.reduce((a, d) => a + (d.montant || 0), 0), [depenses])
-  const cmv = useMemo(() =>
-    lignes.reduce((a, l) => {
-      const pa = l.mla_produits?.prix_achat || 0
-      return a + (l.quantite || 0) * pa
-    }, 0), [lignes])
-  const margeBrute = caTotal - cmv
-  const benefice = margeBrute - totalDepenses
-  const margePct = caTotal > 0 ? ((benefice / caTotal) * 100).toFixed(1) : '0'
+  const loadFinances = async () => {
+    setFinLoading(true)
+    const getPeriodStart = (): string | null => {
+      const d = new Date()
+      if (period === '7j')   { d.setDate(d.getDate() - 7);  return d.toISOString() }
+      if (period === '30j')  { d.setDate(d.getDate() - 30); return d.toISOString() }
+      if (period === 'mois') { d.setDate(1); d.setHours(0,0,0,0); return d.toISOString() }
+      return null
+    }
+    const from = getPeriodStart()
+    let fraisQ  = supabase.from('usr_paiements').select('montant, type_frais')
+    let ventesQ = supabase.from('usr_ventes').select('total, montant_paye, mode_paiement')
+    let lignesQ = supabase.from('usr_ventes_lignes').select('article_nom, quantite, total')
+    if (from) { fraisQ = fraisQ.gte('created_at', from); ventesQ = ventesQ.gte('created_at', from) }
 
-  // ── Chart data ───────────────────────────────────────────────────────────────
+    const [fraisRes, ventesRes, etuRes, lignesRes] = await Promise.all([
+      fraisQ, ventesQ,
+      supabase.from('usr_etudiants')
+        .select('nom, frais_inscription, frais_inscription_paye, frais_formation_v1, frais_formation_v1_paye, frais_formation_v2, frais_formation_v2_paye')
+        .eq('actif', true),
+      lignesQ,
+    ])
 
-  const chartData = useMemo(() => {
-    if (!ventes.length && !achats.length) return []
-    const buckets = getBuckets(startDate, endDate)
-    return buckets.map(b => {
-      let revenus = 0; let depensesB = 0
-      ventes.forEach(v => {
-        const d = new Date(v.created_at)
-        if (d >= b.start && d <= b.end) revenus += v.total || 0
-      })
-      achats.forEach(a => {
-        const d = new Date(a.created_at)
-        if (d >= b.start && d <= b.end) depensesB += a.montant_total || 0
-      })
-      return { name: b.label, Revenus: revenus, Depenses: depensesB }
+    const paiements = fraisRes.data || []
+    const percus = paiements.reduce((s: number, p: any) => s + p.montant, 0)
+    setFraisPercus(percus)
+    setFraisBreak([
+      { label: 'Inscription',  type: 'inscription'  },
+      { label: 'Formation V1', type: 'formation_v1' },
+      { label: 'Formation V2', type: 'formation_v2' },
+    ].map(b => ({
+      ...b,
+      montant: paiements.filter((p: any) => p.type_frais === b.type).reduce((s: number, p: any) => s + p.montant, 0),
+    })))
+
+    const ventes = ventesRes.data || []
+    const caV = ventes.reduce((s: number, v: any) => s + (v.montant_paye || 0), 0)
+    const creds = ventes.filter((v: any) => v.mode_paiement === 'credit')
+    setCaVentes(caV); setNbVentes(ventes.length)
+    setCreances(creds.reduce((s: number, v: any) => s + Math.max(0, v.total - v.montant_paye), 0))
+    setNbCredits(creds.length)
+
+    const etus = etuRes.data || []
+    let totalDette = 0; let nbAvec = 0
+    const cData: { nom: string; dette: number }[] = []
+    for (const e of etus) {
+      const d = Math.max(0,(e.frais_inscription||0)-(e.frais_inscription_paye||0)) +
+                Math.max(0,(e.frais_formation_v1||0)-(e.frais_formation_v1_paye||0)) +
+                Math.max(0,(e.frais_formation_v2||0)-(e.frais_formation_v2_paye||0))
+      if (d > 0) { totalDette += d; nbAvec++; cData.push({ nom: e.nom, dette: d }) }
+    }
+    setDettesEtu(totalDette); setNbEtuDette(nbAvec)
+    setCreditsData(cData.sort((a,b) => b.dette - a.dette))
+
+    const lignes = lignesRes.data || []
+    const map: Record<string, { nom: string; total: number; qty: number }> = {}
+    for (const l of lignes) {
+      if (!map[l.article_nom]) map[l.article_nom] = { nom: l.article_nom, total: 0, qty: 0 }
+      map[l.article_nom].total += l.total; map[l.article_nom].qty += l.quantite
+    }
+    setTopArticles(Object.values(map).sort((a,b) => b.total - a.total).slice(0, 10))
+    setFinLoading(false)
+  }
+
+  // ── Derived ──
+  const totalDette      = etudiants.reduce((s, e) => s + e.dette, 0)
+  const nbDebiteurs     = etudiants.filter(e => e.dette > 0).length
+
+  const filtered = etudiants
+    .filter(e => {
+      if (search && !e.nom.toLowerCase().includes(search.toLowerCase())) return false
+      if (filter === 'dettes') return e.dette > 0
+      if (filter === 'ajour')  return e.dette === 0
+      return true
     })
-  }, [ventes, achats, startDate, endDate])
+    .sort((a, b) => filter === 'dettes' ? b.dette - a.dette : a.nom.localeCompare(b.nom))
 
-  // ── Tendances (LineChart CA journalier) ──────────────────────────────────────
+  const caTotal  = fraisPercus + caVentes
+  const pctFrais = caTotal > 0 ? Math.round((fraisPercus / caTotal) * 100) : 0
 
-  const trendsData = useMemo(() => {
-    const buckets = getBuckets(startDate, endDate)
-    return buckets.map(b => {
-      let ca = 0
-      ventes.forEach(v => {
-        const d = new Date(v.created_at)
-        if (d >= b.start && d <= b.end) ca += v.total || 0
-      })
-      return { name: b.label, CA: ca }
-    })
-  }, [ventes, startDate, endDate])
-
-  // ── Top produits ─────────────────────────────────────────────────────────────
-
-  const topProduits = useMemo(() => {
-    const byProd: Record<string, { nom: string; qte: number; ca: number; marge: number }> = {}
-    lignes.forEach(l => {
-      const nom = l.mla_produits?.nom || 'Inconnu'
-      const pa = l.mla_produits?.prix_achat || 0
-      if (!byProd[l.produit_id]) byProd[l.produit_id] = { nom, qte: 0, ca: 0, marge: 0 }
-      byProd[l.produit_id].qte += l.quantite || 0
-      byProd[l.produit_id].ca += l.sous_total || 0
-      byProd[l.produit_id].marge += (l.quantite || 0) * (l.prix_unitaire - pa)
-    })
-    return Object.values(byProd).sort((a, b) => b.ca - a.ca).slice(0, 10)
-  }, [lignes])
-
-  // ── Top fournisseurs ─────────────────────────────────────────────────────────
-
-  const topFournisseurs = useMemo(() => {
-    const byF: Record<string, { nom: string; total: number }> = {}
-    achats.forEach(a => {
-      const nom = a.mla_fournisseurs?.nom || 'Inconnu'
-      if (!byF[nom]) byF[nom] = { nom, total: 0 }
-      byF[nom].total += a.montant_total || 0
-    })
-    return Object.values(byF).sort((a, b) => b.total - a.total)
-  }, [achats])
-
-  const tooltipStyle = { fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }
+  const typeLabel: Record<string, string> = { inscription: 'Inscription', formation_v1: 'Formation V1', formation_v2: 'Formation V2' }
 
   return (
-    <div className="p-4 space-y-4 pb-24">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-black tracking-tight text-[#1A1210]">Rapports</h2>
-        <div className="w-10 h-0.5 bg-[#8B6400] rounded-full mt-1 mb-0.5" />
-        <p className="text-[11px] text-[#A09589]">Analyses et statistiques financières</p>
-      </div>
+    <div className="flex flex-col h-[calc(100vh-56px)] overflow-hidden">
 
-      {/* Sélecteur période */}
-      <div className="relative">
-        <button
-          onClick={() => setPeriodeOpen(p => !p)}
-          className="w-full flex items-center justify-between border border-[#D4CAB8] rounded-xl px-4 py-3 bg-white text-sm font-semibold text-[#4A4540] hover:border-[#3DAA35] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Calendar size={15} className="text-[#A09589]" />
-            {periodeLabel}
-          </div>
-          <Filter size={14} className="text-[#A09589]" />
-        </button>
-        {periodeOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#D4CAB8] rounded-xl shadow-xl z-20 overflow-hidden">
-            {PERIODES.map(p => (
-              <button
-                key={p.key}
-                onClick={() => { setPeriode(p.key); setPeriodeOpen(false) }}
-                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                  periode === p.key
-                    ? 'bg-[#3DAA35] text-[#2D6B2D] font-bold'
-                    : 'text-[#4A4540] hover:bg-[#FAF7F2]'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Warning produits sans coût */}
-      {produitsSansCout > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5">
-          <div className="flex items-start gap-2.5">
-            <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-700">
-                {produitsSansCout} produit{produitsSansCout > 1 ? 's' : ''} sans coût d'achat renseigné
-              </p>
-              <p className="text-xs text-amber-600 mt-0.5">La marge brute est sous-estimée et le bénéfice peut être surestimé.</p>
-            </div>
-          </div>
-          <button
-            className="mt-2.5 w-full border border-amber-300 text-amber-700 rounded-lg py-2 text-xs font-semibold hover:bg-amber-100 transition-colors"
-            onClick={() => {}}
-          >
-            Compléter les coûts dans Stock
+      {/* ── Onglets principaux ── */}
+      <div className="flex-shrink-0 px-4 pt-4 pb-3">
+        <div className="bg-white rounded-2xl p-1 flex shadow-sm border border-[#E8E2DC]">
+          <button onClick={() => setMainTab('etudiants')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${mainTab === 'etudiants' ? 'bg-[#1B2A8A] text-white shadow-sm' : 'text-gray-400'}`}>
+            Étudiants
+          </button>
+          <button onClick={() => setMainTab('finances')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${mainTab === 'finances' ? 'bg-[#1B2A8A] text-white shadow-sm' : 'text-gray-400'}`}>
+            Finances
           </button>
         </div>
-      )}
+      </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center h-48"><Spinner size="lg" /></div>
-      ) : (
-        <>
-          {/* ── 6 KPI CARDS ────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <KpiCard
-              title="Ventes"
-              value={formatHTG(caTotal)}
-              sub={`Sur la période`}
-              color="bg-green-100"
-              icon={<TrendingUp size={13} className="text-[#3DAA35]" />}
-            />
-            <KpiCard
-              title="Achats fournisseurs"
-              value={formatHTG(totalAchats)}
-              sub={`${achats.length} commande${achats.length !== 1 ? 's' : ''}`}
-              color="bg-[#EEF7EE]"
-              icon={<Truck size={13} className="text-[#3DAA35]" />}
-            />
-            <KpiCard
-              title="Dépenses"
-              value={formatHTG(totalDepenses)}
-              sub="Charges d'exploitation"
-              color="bg-red-100"
-              icon={<TrendingDown size={13} className="text-red-500" />}
-              negative={totalDepenses > 0}
-            />
-            <KpiCard
-              title="Marge brute"
-              value={formatHTG(margeBrute)}
-              sub={`CMV: ${formatHTG(cmv)}`}
-              color="bg-emerald-100"
-              icon={<TrendingUp size={13} className="text-emerald-500" />}
-              negative={margeBrute < 0}
-            />
-            <KpiCard
-              title="Bénéfice"
-              value={formatHTG(benefice)}
-              sub="Marge - Dépenses"
-              color={benefice >= 0 ? 'bg-[#EEF7EE]' : 'bg-red-100'}
-              icon={<TrendingUp size={13} className={benefice >= 0 ? 'text-[#3DAA35]' : 'text-red-500'} />}
-              negative={benefice < 0}
-            />
-            <KpiCard
-              title="Marge %"
-              value={`${margePct}%`}
-              sub="Objectif: 30%"
-              color={Number(margePct) >= 30 ? 'bg-[#EEF7EE]' : 'bg-amber-100'}
-              icon={<Filter size={13} className={Number(margePct) >= 30 ? 'text-[#3DAA35]' : 'text-amber-500'} />}
-              negative={Number(margePct) < 0}
-            />
-          </div>
+      <div className="flex-1 overflow-auto">
 
-          {/* ── CHART Revenus vs Dépenses ───────────────────────────────── */}
-          <div className="bg-white rounded-xl border border-[#D4CAB8] p-4 shadow-sm">
-            <h3 className="text-sm font-bold text-[#2C2420] mb-1">Revenus vs Dépenses</h3>
-            <p className="text-[11px] text-[#A09589] mb-4">Évolution sur la période</p>
-            {chartData.every(d => d.Revenus === 0 && d.Depenses === 0) ? (
-              <div className="flex flex-col items-center py-8 text-center">
-                <Package size={32} className="text-slate-200 mb-2" />
-                <p className="text-sm text-[#A09589]">Aucune donnée sur cette période</p>
+        {/* ══════════════ ONGLET ÉTUDIANTS ══════════════ */}
+        {mainTab === 'etudiants' && (
+          <div className="px-4 pb-10 space-y-3">
+
+            {/* Bannière résumé */}
+            {!etuLoading && (
+              <div className="bg-[#1B2A8A] rounded-3xl px-5 py-5 text-white shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Étudiants actifs</p>
+                    <p className="text-4xl font-black mt-0.5 tracking-tight">{etudiants.length}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-white/60 text-xs font-medium">Total dettes frais</p>
+                    <p className="text-2xl font-black text-[#fca5a5] mt-0.5">{fmt(totalDette)}</p>
+                    <p className="text-white/50 text-xs mt-0.5">{nbDebiteurs} débiteur{nbDebiteurs !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#8B7355' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#8B7355' }} axisLine={false} tickLine={false} />
-                  <Tooltip formatter={(v) => formatHTG(Number(v))} contentStyle={tooltipStyle} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="Revenus" fill="#3DAA35" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Depenses" fill="#EF4444" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
             )}
-          </div>
 
-          {/* ── TABS ───────────────────────────────────────────────────────── */}
-          <div>
-            {/* Tab nav */}
-            <div className="flex overflow-x-auto gap-1 bg-[#E8E0D0] rounded-xl p-1 mb-4 scrollbar-hide">
+            {/* Recherche */}
+            <div className="relative">
+              <Search size={15} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none" />
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher un étudiant..."
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A] shadow-sm" />
+            </div>
+
+            {/* Filtres */}
+            <div className="flex gap-2">
               {([
-                { key: 'tendances', label: 'Tend.' },
-                { key: 'produits',  label: 'Prod.' },
-                { key: 'fournisseurs', label: 'Fourn.' },
-                { key: 'credits',   label: 'Crédits' },
-              ] as { key: Tab; label: string }[]).map(t => (
-                <button key={t.key} onClick={() => setActiveTab(t.key)}
-                  className={`shrink-0 flex-1 py-2 px-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                    activeTab === t.key ? 'bg-white text-[#2D6B2D] shadow-sm' : 'text-[#78726A]'
-                  }`}>
-                  {t.label}
+                { key: 'tous',   label: 'Tous'        },
+                { key: 'dettes', label: 'Avec dettes' },
+                { key: 'ajour',  label: 'À jour'      },
+              ] as { key: Filter; label: string }[]).map(f => (
+                <button key={f.key} onClick={() => setFilter(f.key)}
+                  className={`px-3.5 py-1.5 rounded-full text-sm font-semibold border transition-all
+                    ${filter === f.key
+                      ? f.key === 'dettes' ? 'bg-red-500 text-white border-red-500'
+                        : f.key === 'ajour' ? 'bg-green-500 text-white border-green-500'
+                        : 'bg-[#1B2A8A] text-white border-[#1B2A8A]'
+                      : 'bg-white text-gray-600 border-[#E8E2DC]'}`}>
+                  {f.label}
                 </button>
               ))}
             </div>
 
-            {/* ── TENDANCES ─────────────────────────────────────────────── */}
-            {activeTab === 'tendances' && (
-              <div className="bg-white rounded-xl border border-[#D4CAB8] p-4 shadow-sm">
-                <h3 className="text-sm font-bold text-[#2C2420] mb-4">Évolution des ventes</h3>
-                {trendsData.every(d => d.CA === 0) ? (
-                  <p className="text-sm text-[#A09589] text-center py-6">Aucune vente sur cette période</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={trendsData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#8B7355' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: '#8B7355' }} axisLine={false} tickLine={false} />
-                      <Tooltip formatter={(v) => formatHTG(Number(v))} contentStyle={tooltipStyle} />
-                      <Line type="monotone" dataKey="CA" stroke="#3DAA35" strokeWidth={2}
-                        dot={{ r: 3, fill: '#3DAA35' }} activeDot={{ r: 5 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
+            {/* Liste */}
+            {etuLoading ? (
+              <div className="space-y-2">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="bg-white rounded-2xl h-16 animate-pulse border border-[#F0EDE8]" />
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="bg-white rounded-2xl p-10 text-center border border-[#E8E2DC] animate-fade-in">
+                <div className="w-12 h-12 rounded-2xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-3">
+                  <GraduationCap size={22} className="text-[#1B2A8A]/40" />
+                </div>
+                <p className="font-semibold text-gray-500 text-sm">Aucun étudiant trouvé</p>
+                <p className="text-xs text-gray-400 mt-1">Essayez un autre filtre</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl divide-y divide-[#F0EDE8] border border-[#F0EDE8] shadow-sm overflow-hidden animate-card-in">
+                {filtered.map((e, idx) => (
+                  <button key={e.id} onClick={() => openDetail(e)}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-gray-50 transition-colors animate-card-in"
+                    style={{ animationDelay: `${Math.min(idx, 6) * 20}ms` }}>
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-2xl bg-[#1B2A8A] flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-black text-white">{e.nom[0].toUpperCase()}</span>
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-900 text-sm truncate">{e.nom}</p>
+                      <p className="text-xs text-gray-400 truncate">{e.cours_nom || 'Cours non assigné'}</p>
+                    </div>
+                    {/* Statut dette */}
+                    {e.dette > 0 ? (
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-black text-red-600">{fmt(e.dette)}</p>
+                        <p className="text-[10px] text-red-400">dû</p>
+                      </div>
+                    ) : (
+                      <span className="flex-shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-green-100 text-green-600">
+                        À jour
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════ ONGLET FINANCES ══════════════ */}
+        {mainTab === 'finances' && (
+          <div className="px-4 pb-10 space-y-4">
+
+            {/* Period selector */}
+            <div className="relative">
+              <button onClick={() => setShowPicker(p => !p)}
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm">
+                <span className="text-sm font-semibold text-gray-800">{PERIOD_LABELS[period]}</span>
+                <ChevronDown size={16} className={`text-gray-400 transition-transform ${showPicker ? 'rotate-180' : ''}`} />
+              </button>
+              {showPicker && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-lg border border-[#E8E2DC] overflow-hidden z-20">
+                  {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
+                    <button key={p} onClick={() => { setPeriod(p); setShowPicker(false) }}
+                      className={`w-full px-4 py-3 text-left text-sm transition-colors
+                        ${period === p ? 'font-bold text-[#1B2A8A] bg-[#1B2A8A]/5' : 'text-gray-700 active:bg-gray-50'}`}>
+                      {PERIOD_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* CA card */}
+            <div className="bg-[#1B2A8A] rounded-3xl px-5 py-6 text-white shadow-lg">
+              <p className="text-white/60 text-sm font-medium">CA total</p>
+              <p className="text-4xl font-black mt-1 tracking-tight">
+                {finLoading ? '— HTG' : fmt(caTotal)}
+              </p>
+              <p className="text-white/50 text-sm mt-2">
+                {finLoading ? '...' : `${nbVentes} vente${nbVentes !== 1 ? 's' : ''} produit sur la période`}
+              </p>
+            </div>
+
+            {/* 2×2 KPIs */}
+            {finLoading ? (
+              <div className="grid grid-cols-2 gap-3">
+                {[1,2,3,4].map(i => <div key={i} className="h-24 bg-white rounded-2xl animate-pulse border border-[#F0EDE8]" />)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
+                  <p className="text-xs text-gray-500 font-medium">Frais encaissés</p>
+                  <p className="text-xl font-black text-green-600 mt-1 leading-tight">{fmt(fraisPercus)}</p>
+                  <p className="text-xs text-gray-400 mt-1">{pctFrais}% du CA</p>
+                </div>
+                <div className="bg-white border border-[#F0EDE8] rounded-2xl p-4 shadow-sm">
+                  <p className="text-xs text-gray-500 font-medium">Ventes produits</p>
+                  <p className="text-xl font-black text-[#1B2A8A] mt-1 leading-tight">{fmt(caVentes)}</p>
+                  <p className="text-xs text-gray-400 mt-1">{nbVentes} vente{nbVentes !== 1 ? 's' : ''}</p>
+                </div>
+                <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4">
+                  <p className="text-xs text-orange-600 font-semibold">Créances clients</p>
+                  <p className="text-xl font-black text-orange-600 mt-1 leading-tight">{fmt(creances)}</p>
+                  <p className="text-xs text-gray-400 mt-1">{nbCredits} en attente</p>
+                </div>
+                <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                  <p className="text-xs text-red-600 font-semibold">Dettes étudiants</p>
+                  <p className="text-xl font-black text-red-600 mt-1 leading-tight">{fmt(dettesEtu)}</p>
+                  <p className="text-xs text-gray-400 mt-1">{nbEtuDette} non soldé{nbEtuDette !== 1 ? 's' : ''}</p>
+                </div>
               </div>
             )}
 
-            {/* ── PRODUITS ──────────────────────────────────────────────── */}
-            {activeTab === 'produits' && (
-              <div className="bg-white rounded-xl border border-[#D4CAB8] p-4 shadow-sm">
-                <h3 className="text-sm font-bold text-[#2C2420] mb-1">Top produits</h3>
-                <p className="text-[11px] text-[#A09589] mb-4">Meilleurs vendeurs</p>
-                {topProduits.length === 0 ? (
-                  <p className="text-sm text-[#A09589] text-center py-6">Aucune vente sur cette période</p>
+            {/* Sub-tabs */}
+            <div className="flex gap-1 bg-white rounded-2xl p-1 border border-[#E8E2DC] shadow-sm">
+              {([['frais','Frais'],['ventes','Ventes'],['credits','Crédits']] as [SubTab,string][]).map(([k,l]) => (
+                <button key={k} onClick={() => setSubTab(k)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all
+                    ${subTab === k ? 'bg-[#1B2A8A] text-white shadow-sm' : 'text-gray-500'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {/* Frais */}
+            {subTab === 'frais' && !finLoading && (
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#F0EDE8] space-y-4">
+                <p className="font-bold text-gray-900">Frais encaissés</p>
+                {fraisBreak.every(b => b.montant === 0) ? (
+                  <div className="text-center py-6">
+                    <div className="w-10 h-10 rounded-xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-2.5">
+                      <CreditCard size={18} className="text-[#1B2A8A]/40" />
+                    </div>
+                    <p className="font-semibold text-gray-500 text-sm">Aucun paiement</p>
+                    <p className="text-xs text-gray-400 mt-0.5">sur cette période</p>
+                  </div>
+                ) : fraisBreak.map(b => (
+                  <div key={b.type}>
+                    <div className="flex justify-between mb-1.5">
+                      <p className="text-sm font-semibold text-gray-700">{b.label}</p>
+                      <p className="text-sm font-bold text-[#1B2A8A]">{fmt(b.montant)}</p>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-[#1B2A8A] rounded-full" style={{ width: fraisPercus > 0 ? `${Math.round(b.montant / fraisPercus * 100)}%` : '0%' }} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{fraisPercus > 0 ? Math.round(b.montant / fraisPercus * 100) : 0}% du total frais</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Ventes */}
+            {subTab === 'ventes' && !finLoading && (
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#F0EDE8]">
+                <p className="font-bold text-gray-900 mb-4">Top produits</p>
+                {topArticles.length === 0 ? (
+                  <div className="text-center py-6">
+                    <div className="w-10 h-10 rounded-xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-2.5">
+                      <Package size={18} className="text-[#1B2A8A]/40" />
+                    </div>
+                    <p className="font-semibold text-gray-500 text-sm">Aucune vente</p>
+                    <p className="text-xs text-gray-400 mt-0.5">sur cette période</p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {topProduits.map((p, i) => (
-                      <div key={p.nom} className="flex items-center gap-3">
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
-                          i === 0 ? 'bg-[#E8A820] text-[#2D6B2D]' :
-                          i === 1 ? 'bg-slate-300 text-[#4A4540]' :
-                          i === 2 ? 'bg-amber-700 text-white' :
-                          'bg-[#F0EBE0] text-[#78726A]'
-                        }`}>{i + 1}</span>
+                    {topArticles.map((a, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-6 h-6 rounded-full bg-[#1B2A8A]/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-xs font-bold text-[#1B2A8A]">{i + 1}</span>
+                        </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-[#2C2420] truncate">{p.nom}</p>
-                          <p className="text-[10px] text-[#A09589]">{p.qte} unité{p.qte > 1 ? 's' : ''} vendues</p>
+                          <p className="text-sm font-semibold text-gray-800 truncate">{a.nom}</p>
+                          <p className="text-xs text-gray-400">{a.qty} vendu{a.qty !== 1 ? 's' : ''}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-[#2C2420]">{formatHTG(p.ca)}</p>
-                          <p className={`text-[10px] font-semibold ${p.marge >= 0 ? 'text-[#3DAA35]' : 'text-red-500'}`}>
-                            Marge {formatHTG(p.marge)}
-                          </p>
-                        </div>
+                        <p className="text-sm font-bold text-[#1B2A8A]">{fmt(a.total)}</p>
                       </div>
                     ))}
                   </div>
@@ -476,62 +447,189 @@ export function RapportsPage() {
               </div>
             )}
 
-            {/* ── FOURNISSEURS ──────────────────────────────────────────── */}
-            {activeTab === 'fournisseurs' && (
-              <div className="bg-white rounded-xl border border-[#D4CAB8] p-4 shadow-sm">
-                <h3 className="text-sm font-bold text-[#2C2420] mb-1">Achats par fournisseur</h3>
-                <p className="text-[11px] text-[#A09589] mb-4">{periodeLabel}</p>
-                {topFournisseurs.length === 0 ? (
-                  <div className="flex flex-col items-center py-8 text-center">
-                    <Truck size={28} className="text-slate-200 mb-2" />
-                    <p className="text-sm text-[#A09589]">Aucun achat sur cette période</p>
+            {/* Crédits */}
+            {subTab === 'credits' && !finLoading && (
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#F0EDE8]">
+                <p className="font-bold text-gray-900 mb-4">Dettes étudiants</p>
+                {creditsData.length === 0 ? (
+                  <div className="text-center py-6">
+                    <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center mx-auto mb-2.5">
+                      <CheckCircle size={18} className="text-green-500" />
+                    </div>
+                    <p className="font-semibold text-gray-500 text-sm">Aucune dette</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Tous les étudiants sont à jour</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {topFournisseurs.map((f, i) => {
-                      const pct = totalAchats > 0 ? Math.round((f.total / totalAchats) * 100) : 0
-                      return (
-                        <div key={f.nom}>
-                          <div className="flex justify-between items-center mb-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${
-                                i === 0 ? 'bg-[#2D6B2D] text-white' : 'bg-[#EEF7EE] text-[#3DAA35]'
-                              }`}>{i + 1}</span>
-                              <span className="text-sm font-medium text-[#4A4540]">{f.nom}</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-sm font-bold text-[#2D6B2D]">{formatHTG(f.total)}</span>
-                              <span className="text-[10px] text-[#A09589] ml-1">{pct}%</span>
-                            </div>
-                          </div>
-                          <div className="h-1.5 bg-[#F0EBE0] rounded-full overflow-hidden">
-                            <div className="h-full bg-[#3DAA35] rounded-full" style={{ width: `${pct}%` }} />
-                          </div>
-                        </div>
-                      )
-                    })}
-                    <div className="pt-2 border-t border-[#D4CAB8] flex justify-between text-sm font-bold">
-                      <span className="text-[#4A4540]">Total achats</span>
-                      <span className="text-[#2D6B2D]">{formatHTG(totalAchats)}</span>
-                    </div>
+                  <div className="divide-y divide-[#F0EDE8]">
+                    {creditsData.map((e, i) => (
+                      <div key={i} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                        <p className="text-sm font-semibold text-gray-800">{e.nom}</p>
+                        <p className="text-sm font-bold text-red-600">{fmt(e.dette)}</p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
-            {/* ── CRÉDITS ───────────────────────────────────────────────── */}
-            {activeTab === 'credits' && (
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <CreditCard size={14} className="text-amber-500" />
-                  <p className="text-sm font-bold text-[#4A4540]">Soldes clients en attente</p>
-                </div>
-                <CreditTab />
-              </div>
-            )}
           </div>
-        </>
+        )}
+      </div>
+
+      {/* ══════════════ FICHE ÉTUDIANT BOTTOM SHEET ══════════════ */}
+      {selected && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end"
+          onClick={e => { if (e.target === e.currentTarget) setSelected(null) }}>
+          <div className="bg-[#FAF7F4] w-full rounded-t-3xl animate-modal-up max-h-[90vh] flex flex-col">
+            <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
+
+            {/* Header */}
+            <div className="px-5 pt-2 pb-4 border-b border-[#F0EDE8] flex-shrink-0">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-[#1B2A8A] flex items-center justify-center flex-shrink-0">
+                    <span className="text-xl font-black text-white">{selected.nom[0].toUpperCase()}</span>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900 leading-tight">{selected.nom}</h3>
+                    <p className="text-sm text-gray-400">{selected.cours_nom || 'Cours non assigné'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setSelected(null)}
+                  className="w-8 h-8 rounded-full bg-white border border-[#E8E2DC] flex items-center justify-center flex-shrink-0">
+                  <X size={15} className="text-gray-500" />
+                </button>
+              </div>
+              {/* Infos rapides sous le nom */}
+              <div className="mt-2 space-y-1.5 ml-1">
+                {selected.sexe && (
+                  <p className="text-xs text-[#1B2A8A] font-semibold">
+                    {selected.sexe === 'M' ? 'Masculin' : 'Féminin'}
+                    {selected.date_naissance && ` · Né(e) le ${new Date(selected.date_naissance).toLocaleDateString('fr-HT')}`}
+                  </p>
+                )}
+                {selected.contact && (
+                  <div className="flex items-center gap-2">
+                    <Phone size={12} className="text-gray-400 flex-shrink-0" />
+                    <p className="text-sm text-gray-600">{selected.contact}</p>
+                  </div>
+                )}
+                {selected.email && (
+                  <div className="flex items-center gap-2">
+                    <Mail size={12} className="text-gray-400 flex-shrink-0" />
+                    <p className="text-sm text-gray-600">{selected.email}</p>
+                  </div>
+                )}
+                {selected.adresse && (
+                  <div className="flex items-center gap-2">
+                    <MapPin size={12} className="text-gray-400 flex-shrink-0" />
+                    <p className="text-sm text-gray-600">{selected.adresse}</p>
+                  </div>
+                )}
+                {selected.contact_urgence && (
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={12} className="text-orange-400 flex-shrink-0" />
+                    <p className="text-sm text-gray-600"><span className="text-orange-500 font-semibold">Urgence : </span>{selected.contact_urgence}</p>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <GraduationCap size={12} className="text-gray-400 flex-shrink-0" />
+                  <p className="text-xs text-gray-400">Inscrit le {new Date(selected.created_at).toLocaleDateString('fr-HT')}</p>
+                </div>
+              </div>
+              {selected.notes && (
+                <div className="mt-2 mx-1 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2 flex items-start gap-2">
+                  <StickyNote size={13} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-yellow-800">{selected.notes}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
+
+              {/* Frais */}
+              <div>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-3">Frais scolaires</p>
+                <div className="bg-white rounded-2xl p-4 border border-[#F0EDE8] shadow-sm space-y-4">
+                  {FRAIS_ROWS.map(row => {
+                    const total   = (selected as any)[row.total] || 0
+                    const paye    = (selected as any)[row.paye]  || 0
+                    const restant = Math.max(0, total - paye)
+                    const pct     = total > 0 ? Math.round(paye / total * 100) : 0
+                    if (total === 0) return null
+                    return (
+                      <div key={row.label}>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-semibold text-gray-700">{row.label}</p>
+                          {restant > 0
+                            ? <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{fmt(restant)} dû</span>
+                            : <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Soldé</span>
+                          }
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all"
+                            style={{ width: `${pct}%`, background: pct === 100 ? '#16a34a' : '#f97316' }} />
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          <p className="text-xs text-gray-400">{fmt(paye)} payé</p>
+                          <p className="text-xs text-gray-400">{fmt(total)} total</p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Dette totale */}
+              {selected.dette > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-red-700">Dette totale</p>
+                  <p className="text-xl font-black text-red-600">{fmt(selected.dette)}</p>
+                </div>
+              )}
+
+              {/* Historique paiements */}
+              <div>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-3">Historique paiements</p>
+                {histLoading ? (
+                  <div className="space-y-2">
+                    {[1,2,3].map(i => <div key={i} className="bg-white rounded-2xl h-12 animate-pulse border border-[#F0EDE8]" />)}
+                  </div>
+                ) : history.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-6 text-center border border-[#F0EDE8] animate-fade-in">
+                    <div className="w-9 h-9 rounded-xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-2">
+                      <CreditCard size={16} className="text-[#1B2A8A]/40" />
+                    </div>
+                    <p className="text-sm font-semibold text-gray-500">Aucun paiement enregistré</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Les frais encaissés apparaissent ici</p>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl divide-y divide-[#F0EDE8] border border-[#F0EDE8] shadow-sm overflow-hidden">
+                    {history.map((h, i) => (
+                      <div key={i} className="flex items-center justify-between px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">{typeLabel[h.type_frais] || h.type_frais}</p>
+                          <p className="text-xs text-gray-400">{new Date(h.created_at).toLocaleDateString('fr-HT')}</p>
+                        </div>
+                        <p className="text-sm font-bold text-green-600">+{fmt(h.montant)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Action */}
+              <button
+                onClick={() => { setSelected(null); onPayEtudiant(selected.id) }}
+                className="w-full bg-[#A01020] text-white py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-transform shadow-md">
+                Encaisser un paiement
+              </button>
+
+            </div>
+          </div>
+        </div>
       )}
+
     </div>
   )
 }

@@ -9,16 +9,16 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<string, string> = {
-  primary:   'bg-[#3DAA35] text-[#2D6B2D] font-bold hover:bg-[#2D8B2D] disabled:bg-[#8DC88D]',
+  primary:   'bg-[#A01020] text-white font-bold hover:bg-[#8B0D1A] disabled:bg-[#C06070]',
   secondary: 'bg-[#F0EBE0] text-[#4A4540] hover:bg-[#E0D8CC] disabled:bg-[#FAF7F2]',
   danger:    'bg-red-500 text-white hover:bg-red-600 disabled:bg-red-300',
-  ghost:     'border border-[#3DAA35] text-[#2D6B2D] hover:bg-[#EEF7EE] disabled:opacity-50',
+  ghost:     'border border-[#1B2A8A] text-[#1B2A8A] hover:bg-[#1B2A8A]/5 disabled:opacity-50',
 }
 
 const sizeClasses: Record<string, string> = {
-  sm: 'px-3 py-1.5 text-sm rounded-lg',
-  md: 'px-4 py-2 text-sm rounded-lg',
-  lg: 'px-6 py-3 text-base rounded-lg',
+  sm: 'px-3 py-1.5 text-sm rounded-xl',
+  md: 'px-4 py-2 text-sm rounded-xl',
+  lg: 'px-6 py-3 text-base rounded-xl',
 }
 
 export function Button({

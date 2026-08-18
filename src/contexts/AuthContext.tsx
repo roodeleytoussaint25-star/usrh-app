@@ -5,7 +5,8 @@ import type { Session } from '../types'
 interface AuthContextType {
   session: Session | null
   loading: boolean
-  loginWithEmail: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
+  appActive: boolean
+  login: (nom: string, password: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
 }
 
@@ -15,75 +16,64 @@ export const useAuth = () => useContext(AuthContext)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [appActive, setAppActive] = useState(true)
 
   useEffect(() => {
-    const stored = localStorage.getItem('mla_session')
+    const stored = localStorage.getItem('usr_session')
     if (stored) {
       try { setSession(JSON.parse(stored)) } catch {}
     }
+    supabase.from('usr_config').select('value').eq('key', 'app_active').single()
+      .then(({ data }) => { if (data) setAppActive(data.value === 'true') })
     setLoading(false)
   }, [])
 
-  const loginWithEmail = async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
-    const trimEmail = email.trim().toLowerCase()
+  const login = async (nom: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    const trimNom = nom.trim()
     const trimPw = password.trim()
 
-    // ── Vérifier compte admin ──────────────────────────────────────────
-    const [{ data: cfgEmail }, { data: cfgPw }] = await Promise.all([
-      supabase.from('mla_config').select('valeur').eq('id', 'admin_email').single(),
-      supabase.from('mla_config').select('valeur').eq('id', 'admin_password').single(),
-    ])
+    // Check admin password dans config
+    const { data: cfg } = await supabase
+      .from('usr_config')
+      .select('value')
+      .eq('key', 'admin_password')
+      .single()
 
-    const adminEmail = cfgEmail?.valeur?.trim().toLowerCase() || ''
-    const adminPw = cfgPw?.valeur || ''
-
-    // Si l'email correspond à l'admin → vérifier mot de passe directement
-    if (!adminEmail || trimEmail === adminEmail) {
-      if (trimPw === adminPw) {
-        const s: Session = { role: 'admin' }
-        setSession(s)
-        localStorage.setItem('mla_session', JSON.stringify(s))
-        return { ok: true }
-      }
-      // Email admin correct mais mot de passe faux → erreur immédiate (pas de fallback employé)
-      if (adminEmail && trimEmail === adminEmail) {
-        return { ok: false, error: 'Mot de passe incorrect' }
-      }
+    if (cfg?.value === trimPw && trimNom.toLowerCase() === 'admin') {
+      const s: Session = { role: 'admin', employeNom: 'Admin' }
+      setSession(s)
+      localStorage.setItem('usr_session', JSON.stringify(s))
+      return { ok: true }
     }
 
-    // ── Vérifier compte employé ────────────────────────────────────────
+    // Check employés
     const { data: employe } = await supabase
-      .from('mla_employes')
-      .select('*, succursale:mla_succursales(id, nom)')
-      .eq('email', trimEmail)
+      .from('usr_employes')
+      .select('*')
+      .ilike('nom', trimNom)
       .eq('actif', true)
       .single()
 
-    if (!employe) return { ok: false, error: 'Aucun compte trouvé pour cet email' }
+    if (!employe) return { ok: false, error: 'Aucun compte trouvé' }
     if (employe.mot_de_passe !== trimPw) return { ok: false, error: 'Mot de passe incorrect' }
-    if (!employe.succursale_id) return { ok: false, error: 'Aucune succursale configurée pour ce compte' }
-
-    const succursale = Array.isArray(employe.succursale) ? employe.succursale[0] : employe.succursale
 
     const s: Session = {
-      role: 'employe',
+      role: employe.role as 'admin' | 'employe',
       employeId: employe.id,
       employeNom: employe.nom,
-      succursaleId: employe.succursale_id,
-      succursaleNom: succursale?.nom || '',
     }
     setSession(s)
-    localStorage.setItem('mla_session', JSON.stringify(s))
+    localStorage.setItem('usr_session', JSON.stringify(s))
     return { ok: true }
   }
 
   const logout = () => {
     setSession(null)
-    localStorage.removeItem('mla_session')
+    localStorage.removeItem('usr_session')
   }
 
   return (
-    <AuthContext.Provider value={{ session, loading, loginWithEmail, logout }}>
+    <AuthContext.Provider value={{ session, loading, appActive, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

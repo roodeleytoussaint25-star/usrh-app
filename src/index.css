@@ -1,24 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary:        #3DAA35;
-  --color-primary-hover:  #2D8B2D;
-  --color-primary-dark:   #2D6B2D;
-  --color-accent-gold:    #8B6400;
-  --color-accent-red:     #DC2626;
-  --color-surface:        #2D6B2D;
+  --color-primary:        #1B2A8A;
+  --color-primary-hover:  #16227A;
+  --color-primary-dark:   #111A60;
+  --color-accent-red:     #A01020;
   --color-text-primary:   #111827;
   --color-text-secondary: #4B5563;
-  --color-border:         #D4CAB8;
+  --color-border:         #E5E7EB;
 }
 
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: #F5F0E8;
+  background-color: #FAF7F4;
   color: #111827;
   margin: 0;
 }
 
 #root { min-height: 100vh; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+
+@keyframes modal-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-modal-up { animation: modal-up 0.28s cubic-bezier(0.32, 0.72, 0, 1); }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-card-in { animation: card-in 0.22s ease-out both; }
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-page-in { animation: page-in 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+
+@keyframes card-border-spin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+.card-spinning-border {
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% + 3px);
+  height: calc(100% + 3px);
+  border-radius: inherit;
+  background: linear-gradient(0deg, #1B2A8A -40%, #A01020 100%);
+}
+.card-spinning-border::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(0deg);
+  width: 200%;
+  height: 7rem;
+  background: linear-gradient(0deg, rgba(27,42,138,0) 0%, #A01020 45%, #FF2040 55%, rgba(27,42,138,0) 100%);
+  animation: card-border-spin 3s linear infinite;
+}

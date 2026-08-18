@@ -1,96 +1,49 @@
-# Manno Lavi Agrikol — App de gestion
+# USRH — Unité Spéciale Rapprochée d'Haïti
 
-Stack : React + Vite + Supabase + Vercel
-Client : Emmanuel, Les Genres du Nord — Intrants agricoles, 2 succursales (Hinche + Saint-Raphaël)
-Fiche client : ~/OS_Roodeley/01_Projets/Projet_AppsPME_Haiti/Prospects/PROSPECT_Emmanuel-LesGenresDuNord.md
+Stack : React + Vite + Supabase + Vercel + BluetoothPrint
+Client : Lylinca Osna — École sécurité rapprochée, tablette Android
+Fiche client : ~/OS_Roodeley/01_Projets/Projet_AppsPME_Haiti/Clients/CLIENT_Lylinca-Osna-USRH.md
 
 ## Supabase
+URL : https://ofrybimftwriaxhfuljt.supabase.co
+Préfixe tables : `usr_`
+Compte : nouveau compte Supabase (pas le compte principal)
+Migration : supabase_migration_usrh.sql
 
-- URL : https://tzgssgfbbumvmzkaefnk.supabase.co
-- Préfixe tables : `mla_`
-- Migration : `supabase_migration_mla.sql`
-
-## Spec
-
-Commerce d'intrants agricoles (semences, engrais, pesticides, herbicides, matériel).
-2 succursales : Hinche (principale) + Saint-Raphaël.
-Stock unifié — pas de stock séparé par succursale. Les ventes indiquent la succursale d'où elles viennent.
-Employé à venir. Auth : admin (Emmanuel) + login employé avec sélection nom + succursale active.
+## Couleurs brand (extraites du logo USRH)
+- Bleu royal : #1B2A8A (sidebar, header, boutons secondaires)
+- Cramoisi : #A01020 (CTA, boutons primaires, accent)
+- Background : #F0F2F5
 
 ## Pages
+1. Dashboard — CA jour, dettes frais, actions rapides
+2. Étudiants — inscription, suivi frais participation + graduation
+3. Ventes — articles + panier + historique (liées à un étudiant)
+4. Stock — articles + entrées de stock + modification prix
+5. Rapports — CA, frais perçus vs dus (admin only)
+6. Paramètres — employés CRUD, mot de passe, infos (admin only)
 
-1. **Dashboard** — CA jour (total + par succursale), alertes stock bas, 5 dernières ventes
-2. **Ventes** — sélecteur succursale en haut, employé actif, sélection produit + quantité, historique jour
-3. **Stock** — liste unifiée avec seuil alerte, badge rouge si rupture, catégories, unité (sac/litre/kg/unité)
-4. **Fournisseurs** — achats entrants, mise à jour stock
-5. **Rapports** (admin only) — CA jour/semaine/mois filtrable par succursale, top produits, marge brute
-6. **Finances** (admin only) — Dépenses / Emprunts / Investissements
+## Tables
+- usr_config (key, value)
+- usr_employes (nom, mot_de_passe, role, actif)
+- usr_etudiants (nom, contact, frais_participation, frais_participation_paye, frais_graduation, frais_graduation_paye, actif)
+- usr_paiements (etudiant_id, employe_id, type_frais, montant, note)
+- usr_articles (nom, prix, stock, actif)
+- usr_ventes (etudiant_id, employe_id, total, mode_paiement, montant_paye, note)
+- usr_ventes_lignes (vente_id, article_id, article_nom, quantite, prix_unitaire, total)
+- usr_stock_entrees (article_id, quantite, note)
 
-## Règles
-
-- Mobile Android priorité (Hinche — réseau variable)
-- Langue française
-- Sélecteur succursale persistant dans session (employé choisit en se connectant)
-- Vendeur/employé voit uniquement Ventes + Stock
-- Admin voit tout
-- Pas d'imprimante thermique pour V1
-
-## Mots de passe
-
-- Admin : `manno2026`
-- Employé : `agrikol123`
-
-## LocalStorage key
-
-`mla_session` (pas pap_session)
-
-## État du build
-
-### ✅ Fait
-- Discovery complète (2026-07-05, Emmanuel)
-- Supabase créé, migration prête
-- Base de code copiée depuis papeterie-app + adaptée
-
-### 🔄 En cours
-- Refactoring complet pap_ → mla_ + ajout succursale
-
-### ⏳ À faire
-- Appliquer migration SQL sur Supabase
-- Adapter AuthContext + types + toutes les pages
-- Tester login admin + employé
-- Déploiement Vercel
+## Auth
+Login par nom + mot de passe (pas email)
+Admin : nom="Admin" / mdp=usrh2026
+Employé : nom="Employe" / mdp=employe123
+LocalStorage key : usr_session
 
 ## Lancer l'app
+npm run dev → http://localhost:5173
 
-```bash
-cd /home/user/manno-lavi-agrikol
-npm run dev
-# → http://localhost:5173
-```
+## URL Production
+https://usrh-app.vercel.app
 
-## Journal des sessions
-
-### Session 2 — 2026-08-05 (suite)
-- Migration appliquée sur Supabase (14 tables, RLS désactivé, passwords + succursales + 6 catégories seedées)
-- Couleurs brand : #4DD119 (lime) / #F5C518 (jaune) / #1C2B6E (marine) — appliquées partout
-- Onglet Finances supprimé (hors scope V1)
-- 4 nouvelles catégories : Produits vétérinaires, Insecticides, Fongicides, Foliaires
-- 49 produits importés (liste officielle Emmanuel) + nettoyage 11 placeholders
-- Unités ajoutées : lbs, ml, gr
-- Autocomplete produits dans Ventes et Achats (ProductSearch.tsx)
-- Mode de saisie du coût : unitaire OU achat en gros (lot) avec calcul auto
-- Page Paramètres : gestion employés + mots de passe + guide aide
-- Build : 0 erreurs TypeScript
-
-### ⏳ À faire (session suivante)
-- Design details / polish UI
-- Tester login admin + employé en conditions réelles
-- Ajouter un employé test dans mla_employes
-- Déploiement Vercel
-- **DEADLINE livraison : 12 août 2026**
-
-### Session 1 — 2026-08-05
-- Projet initialisé depuis papeterie-app
-- Supabase URL + key configurés
-- Migration SQL mla_ créée (14 tables + seed)
-- CLAUDE.md réécrit pour le contexte agrikol
+## Livraison : 24 août 2026
+Déployé : 17 août 2026
