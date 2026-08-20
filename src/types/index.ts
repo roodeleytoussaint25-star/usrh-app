@@ -36,8 +36,6 @@ export interface Etudiant {
   adresse?: string
   contact_urgence?: string
   notes?: string
-  cours_id?: number
-  cours?: { nom: string }
   frais_inscription: number
   frais_inscription_paye: number
   frais_formation_v1: number
