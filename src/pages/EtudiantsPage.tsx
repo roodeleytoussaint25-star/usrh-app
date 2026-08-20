@@ -9,13 +9,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { Etudiant, Cours } from '@/types'
 
-type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation'
+type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation' | 'seminaire'
 
 const FRAIS_CONFIG = [
   { type: 'inscription'  as TypeFrais, label: 'Inscr.',    fullLabel: 'Inscription',      key: 'frais_inscription'  as keyof Etudiant, paye: 'frais_inscription_paye'  as keyof Etudiant },
   { type: 'formation_v1' as TypeFrais, label: 'Doc.',      fullLabel: 'Document',          key: 'frais_formation_v1' as keyof Etudiant, paye: 'frais_formation_v1_paye' as keyof Etudiant },
   { type: 'formation_v2' as TypeFrais, label: '1er Vers.', fullLabel: 'Premier versement', key: 'frais_formation_v2' as keyof Etudiant, paye: 'frais_formation_v2_paye' as keyof Etudiant },
   { type: 'graduation'   as TypeFrais, label: 'Diplôme',   fullLabel: 'Graduation',        key: 'frais_graduation'   as keyof Etudiant, paye: 'frais_graduation_paye'   as keyof Etudiant },
+  { type: 'seminaire'    as TypeFrais, label: 'Sémin.',    fullLabel: 'Séminaire',         key: 'frais_seminaire'    as keyof Etudiant, paye: 'frais_seminaire_paye'    as keyof Etudiant },
 ]
 
 const fmt = (n: number) => n.toLocaleString('fr-HT') + ' HTG'
@@ -302,7 +303,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const loadAll = async () => {
     const [etuRes, cfgRes] = await Promise.all([
       supabase.from('usr_etudiants').select('*').eq('actif', true).order('nom'),
-      supabase.from('usr_config').select('key,value').in('key', ['frais_inscription','frais_formation_v1','frais_formation_v2','frais_graduation']),
+      supabase.from('usr_config').select('key,value').in('key', ['frais_inscription','frais_formation_v1','frais_formation_v2','frais_graduation','frais_seminaire']),
     ])
     setEtudiants(etuRes.data || [])
     const cfg: Record<string, number> = {}
@@ -329,6 +330,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       frais_formation_v1: fraisConfig['frais_formation_v1'] ?? 30000,
       frais_formation_v2: fraisConfig['frais_formation_v2'] ?? 30000,
       frais_graduation:   fraisConfig['frais_graduation']   ?? 0,
+      frais_seminaire:    fraisConfig['frais_seminaire']    ?? 0,
     })
     setSaving(false)
     setFormNom(''); setFormContact(''); setFormEmail(''); setFormSexe('')
@@ -368,12 +370,13 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     Math.max(0, e.frais_inscription  - e.frais_inscription_paye)  +
     Math.max(0, e.frais_formation_v1 - e.frais_formation_v1_paye) +
     Math.max(0, e.frais_formation_v2 - e.frais_formation_v2_paye) +
-    Math.max(0, (e.frais_graduation || 0) - (e.frais_graduation_paye || 0))
+    Math.max(0, (e.frais_graduation  || 0) - (e.frais_graduation_paye  || 0)) +
+    Math.max(0, (e.frais_seminaire   || 0) - (e.frais_seminaire_paye   || 0))
 
   const getStatus = (e: Etudiant) => {
     const dette = getDette(e)
     if (dette === 0) return 'paid'
-    const totalPaye = e.frais_inscription_paye + e.frais_formation_v1_paye + e.frais_formation_v2_paye + (e.frais_graduation_paye || 0)
+    const totalPaye = e.frais_inscription_paye + e.frais_formation_v1_paye + e.frais_formation_v2_paye + (e.frais_graduation_paye || 0) + (e.frais_seminaire_paye || 0)
     return totalPaye > 0 ? 'partial' : 'unpaid'
   }
 

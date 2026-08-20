@@ -27,11 +27,12 @@ const FRAIS_CONFIG = [
   { type: 'formation_v1' as TypeFrais, label: 'Document',          fieldTotal: 'frais_formation_v1', fieldPaye: 'frais_formation_v1_paye' },
   { type: 'formation_v2' as TypeFrais, label: 'Premier versement', fieldTotal: 'frais_formation_v2', fieldPaye: 'frais_formation_v2_paye' },
   { type: 'graduation'   as TypeFrais, label: 'Graduation',        fieldTotal: 'frais_graduation',   fieldPaye: 'frais_graduation_paye'   },
+  { type: 'seminaire'    as TypeFrais, label: 'Séminaire',         fieldTotal: 'frais_seminaire',    fieldPaye: 'frais_seminaire_paye'    },
 ]
 
 const fmt = (n: number) => Math.round(n).toString() + ' HTG'
 const shortRef = (id: number) => 'RE-' + String(id).padStart(6, '0')
-const TYPE_FRAIS_LABEL: Record<string, string> = { inscription: 'Inscription', formation_v1: 'Document', formation_v2: 'Premier versement', graduation: 'Graduation' }
+const TYPE_FRAIS_LABEL: Record<string, string> = { inscription: 'Inscription', formation_v1: 'Document', formation_v2: 'Premier versement', graduation: 'Graduation', seminaire: 'Séminaire' }
 
 const selectCls = "w-full appearance-none bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm text-gray-800 focus:outline-none focus:border-[#1B2A8A] pr-10"
 
@@ -125,7 +126,7 @@ export function VentesPage({ preselectStudentId, preselectFraisType, onMounted }
 
   const loadFraisInfo = async (id: number, targetFraisType?: TypeFrais) => {
     const { data } = await supabase.from('usr_etudiants')
-      .select('id, nom, frais_inscription, frais_inscription_paye, frais_formation_v1, frais_formation_v1_paye, frais_formation_v2, frais_formation_v2_paye, frais_graduation, frais_graduation_paye')
+      .select('id, nom, frais_inscription, frais_inscription_paye, frais_formation_v1, frais_formation_v1_paye, frais_formation_v2, frais_formation_v2_paye, frais_graduation, frais_graduation_paye, frais_seminaire, frais_seminaire_paye')
       .eq('id', id).single()
     if (!data) return
     const d = data as Record<string, number>

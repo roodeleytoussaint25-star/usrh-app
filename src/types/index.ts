@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'employe'
-export type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation'
+export type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation' | 'seminaire'
 
 export interface Session {
   role: Role
@@ -44,6 +44,8 @@ export interface Etudiant {
   frais_formation_v2_paye: number
   frais_graduation: number
   frais_graduation_paye: number
+  frais_seminaire: number
+  frais_seminaire_paye: number
   actif: boolean
   created_at: string
 }

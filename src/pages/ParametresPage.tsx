@@ -9,6 +9,7 @@ const FRAIS_LABELS: { key: string; label: string }[] = [
   { key: 'frais_formation_v1', label: 'Document' },
   { key: 'frais_formation_v2', label: 'Premier versement' },
   { key: 'frais_graduation',   label: 'Graduation' },
+  { key: 'frais_seminaire',    label: 'Séminaire' },
 ]
 
 export function ParametresPage() {
