@@ -9,18 +9,61 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { Etudiant, Cours } from '@/types'
 
-type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2'
+type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation'
 
 const FRAIS_CONFIG = [
-  { type: 'inscription'  as TypeFrais, label: 'Inscr.',    key: 'frais_inscription'  as keyof Etudiant, paye: 'frais_inscription_paye'  as keyof Etudiant },
-  { type: 'formation_v1' as TypeFrais, label: 'V1',        key: 'frais_formation_v1' as keyof Etudiant, paye: 'frais_formation_v1_paye' as keyof Etudiant },
-  { type: 'formation_v2' as TypeFrais, label: 'V2',        key: 'frais_formation_v2' as keyof Etudiant, paye: 'frais_formation_v2_paye' as keyof Etudiant },
+  { type: 'inscription'  as TypeFrais, label: 'Inscr.',    fullLabel: 'Inscription',       key: 'frais_inscription'  as keyof Etudiant, paye: 'frais_inscription_paye'  as keyof Etudiant },
+  { type: 'formation_v1' as TypeFrais, label: 'Doc.',      fullLabel: 'Document',           key: 'frais_formation_v1' as keyof Etudiant, paye: 'frais_formation_v1_paye' as keyof Etudiant },
+  { type: 'formation_v2' as TypeFrais, label: '1er Vers.', fullLabel: 'Premier versement',  key: 'frais_formation_v2' as keyof Etudiant, paye: 'frais_formation_v2_paye' as keyof Etudiant },
+  { type: 'graduation'   as TypeFrais, label: 'Diplôme',   fullLabel: 'Graduation',         key: 'frais_graduation'   as keyof Etudiant, paye: 'frais_graduation_paye'   as keyof Etudiant },
 ]
 
 const fmt = (n: number) => n.toLocaleString('fr-HT') + ' HTG'
 const getInitials = (nom: string) => nom.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
 
-interface Props { onPayEtudiant: (id: number) => void }
+function DOBPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parse = (v: string) => {
+    if (!v) return { y: '', m: '', d: '' }
+    const p = v.split('-')
+    return { y: p[0] || '', m: p[1] ? String(parseInt(p[1])) : '', d: p[2] ? String(parseInt(p[2])) : '' }
+  }
+  const [y, setY] = useState(() => parse(value).y)
+  const [m, setM] = useState(() => parse(value).m)
+  const [d, setD] = useState(() => parse(value).d)
+
+  useEffect(() => {
+    const p = parse(value)
+    setY(p.y); setM(p.m); setD(p.d)
+  }, [value])
+
+  const commit = (ny: string, nm: string, nd: string) => {
+    setY(ny); setM(nm); setD(nd)
+    if (ny && nm && nd) onChange(`${ny}-${nm.padStart(2, '0')}-${nd.padStart(2, '0')}`)
+    else if (!ny && !nm && !nd) onChange('')
+  }
+  const thisYear = new Date().getFullYear()
+  const cls = "flex-1 bg-white border border-[#E8E2DC] rounded-xl px-2 py-3 text-sm focus:outline-none focus:border-[#1B2A8A] appearance-none"
+  return (
+    <div className="flex gap-2">
+      <select value={d} onChange={e => commit(y, m, e.target.value)} className={cls}>
+        <option value="">Jour</option>
+        {Array.from({ length: 31 }, (_, i) => i + 1).map(v => <option key={v} value={String(v)}>{v}</option>)}
+      </select>
+      <select value={m} onChange={e => commit(y, e.target.value, d)} className={cls}>
+        <option value="">Mois</option>
+        {['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'].map((name, i) =>
+          <option key={i + 1} value={String(i + 1)}>{name}</option>
+        )}
+      </select>
+      <select value={y} onChange={e => commit(e.target.value, m, d)} className={cls}>
+        <option value="">Année</option>
+        {Array.from({ length: thisYear - 1939 }, (_, i) => thisYear - i).map(v => <option key={v} value={String(v)}>{v}</option>)}
+      </select>
+    </div>
+  )
+}
+
+interface Props { onPayEtudiant: (id: number, fraisType?: TypeFrais) => void }
 
 export function EtudiantsPage({ onPayEtudiant }: Props) {
   const { session } = useAuth()
@@ -32,8 +75,9 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
   const [saving, setSaving]       = useState(false)
-  const [filterStatus, setFilterStatus] = useState<'tous' | 'retards' | 'ajour'>('tous')
-  const [sortBy, setSortBy]             = useState<'az' | 'dette'>('az')
+  const [filterStatus, setFilterStatus]   = useState<'tous' | 'retards' | 'ajour'>('tous')
+  const [filterCoursId, setFilterCoursId] = useState<number | null>(null)
+  const [sortBy, setSortBy]               = useState<'az' | 'dette'>('az')
 
   // Ajouter étudiant
   const [showForm, setShowForm]             = useState(false)
@@ -47,15 +91,15 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const [formNotes, setFormNotes]           = useState('')
   const [formCoursId, setFormCoursId]       = useState('')
 
+  // Frais école globaux (depuis usr_config)
+  const [fraisConfig, setFraisConfig] = useState<Record<string, number>>({})
+
   // Ajouter cours
   const [showCoursForm, setShowCoursForm]               = useState(false)
   const [newCoursNom, setNewCoursNom]                   = useState('')
   const [newCoursHoraire, setNewCoursHoraire]           = useState('')
   const [newCoursDuree, setNewCoursDuree]               = useState('')
   const [newCoursProfesseur, setNewCoursProfesseur]     = useState('')
-  const [newCoursInscription, setNewCoursInscription]   = useState('5000')
-  const [newCoursV1, setNewCoursV1]                     = useState('30000')
-  const [newCoursV2, setNewCoursV2]                     = useState('30000')
 
   // Détail / édition cours
   const [selectedCours, setSelectedCours]               = useState<Cours | null>(null)
@@ -72,12 +116,16 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   useEffect(() => { loadAll() }, [])
 
   const loadAll = async () => {
-    const [coursRes, etuRes] = await Promise.all([
+    const [coursRes, etuRes, cfgRes] = await Promise.all([
       supabase.from('usr_cours').select('*').eq('actif', true).order('nom'),
       supabase.from('usr_etudiants').select('*, cours:usr_cours(nom)').eq('actif', true).order('nom'),
+      supabase.from('usr_config').select('key,value').in('key', ['frais_inscription','frais_formation_v1','frais_formation_v2','frais_graduation']),
     ])
     setCours(coursRes.data || [])
     setEtudiants(etuRes.data || [])
+    const cfg: Record<string, number> = {}
+    for (const r of cfgRes.data || []) cfg[r.key] = parseFloat(r.value) || 0
+    setFraisConfig(cfg)
     setLoading(false)
   }
 
@@ -85,8 +133,8 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     e.preventDefault()
     const nom = formNom.trim()
     if (!nom) return
+    if (!formCoursId) { showToast('Sélectionner un cours avant d\'enregistrer'); return }
     setSaving(true)
-    const coursChoisi = cours.find(c => c.id === parseInt(formCoursId))
     await supabase.from('usr_etudiants').insert({
       nom,
       contact:          formContact.trim()  || null,
@@ -96,10 +144,11 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       adresse:          formAdresse.trim()  || null,
       contact_urgence:  formUrgence.trim()  || null,
       notes:            formNotes.trim()    || null,
-      cours_id:           coursChoisi?.id || null,
-      frais_inscription:  coursChoisi?.frais_inscription  ?? 5000,
-      frais_formation_v1: coursChoisi?.frais_formation_v1 ?? 30000,
-      frais_formation_v2: coursChoisi?.frais_formation_v2 ?? 30000,
+      cours_id:           parseInt(formCoursId),
+      frais_inscription:  fraisConfig['frais_inscription']  ?? 5000,
+      frais_formation_v1: fraisConfig['frais_formation_v1'] ?? 30000,
+      frais_formation_v2: fraisConfig['frais_formation_v2'] ?? 30000,
+      frais_graduation:   fraisConfig['frais_graduation']   ?? 0,
     })
     setSaving(false)
     setFormNom(''); setFormContact(''); setFormEmail(''); setFormSexe(''); setFormNaissance(''); setFormAdresse(''); setFormUrgence(''); setFormNotes(''); setFormCoursId('')
@@ -118,13 +167,9 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       horaire:    newCoursHoraire.trim() || null,
       duree:      newCoursDuree.trim()   || null,
       professeur: newCoursProfesseur.trim() || null,
-      frais_inscription:  parseFloat(newCoursInscription) || 5000,
-      frais_formation_v1: parseFloat(newCoursV1) || 30000,
-      frais_formation_v2: parseFloat(newCoursV2) || 30000,
     })
     setSaving(false)
     setNewCoursNom(''); setNewCoursHoraire(''); setNewCoursDuree(''); setNewCoursProfesseur('')
-    setNewCoursInscription('5000'); setNewCoursV1('30000'); setNewCoursV2('30000')
     setShowCoursForm(false)
     showToast(`Cours "${nom}" créé`)
     loadAll()
@@ -138,9 +183,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       horaire:    editCours.horaire?.trim() || null,
       duree:      editCours.duree?.trim()   || null,
       professeur: editCours.professeur?.trim() || null,
-      frais_inscription:  editCours.frais_inscription,
-      frais_formation_v1: editCours.frais_formation_v1,
-      frais_formation_v2: editCours.frais_formation_v2,
     }).eq('id', editCours.id)
     setSaving(false)
     setEditCours(null)
@@ -165,6 +207,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       frais_inscription:  editData.frais_inscription,
       frais_formation_v1: editData.frais_formation_v1,
       frais_formation_v2: editData.frais_formation_v2,
+      frais_graduation:   editData.frais_graduation,
     }).eq('id', editData.id)
     setSaving(false)
     setEditData(null)
@@ -183,6 +226,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     if (!selectedCours) return
     await supabase.from('usr_cours').update({ actif: false }).eq('id', selectedCours.id)
     setCours(prev => prev.filter(c => c.id !== selectedCours.id))
+    if (filterCoursId === selectedCours.id) setFilterCoursId(null)
     setConfirmDeleteCours(false)
     setSelectedCours(null)
     showToast('Cours supprimé')
@@ -191,12 +235,13 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const getDette = (e: Etudiant) =>
     Math.max(0, e.frais_inscription  - e.frais_inscription_paye)  +
     Math.max(0, e.frais_formation_v1 - e.frais_formation_v1_paye) +
-    Math.max(0, e.frais_formation_v2 - e.frais_formation_v2_paye)
+    Math.max(0, e.frais_formation_v2 - e.frais_formation_v2_paye) +
+    Math.max(0, (e.frais_graduation || 0)  - (e.frais_graduation_paye || 0))
 
   const getStatus = (e: Etudiant) => {
     const dette = getDette(e)
     if (dette === 0) return 'paid'
-    const totalPaye = e.frais_inscription_paye + e.frais_formation_v1_paye + e.frais_formation_v2_paye
+    const totalPaye = e.frais_inscription_paye + e.frais_formation_v1_paye + e.frais_formation_v2_paye + (e.frais_graduation_paye || 0)
     return totalPaye > 0 ? 'partial' : 'unpaid'
   }
 
@@ -205,6 +250,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const filtered = etudiants
     .filter(e => {
       if (search && !e.nom.toLowerCase().includes(search.toLowerCase())) return false
+      if (filterCoursId !== null && e.cours_id !== filterCoursId) return false
       if (filterStatus === 'retards') return getDette(e) > 0
       if (filterStatus === 'ajour')   return getDette(e) === 0
       return true
@@ -251,21 +297,21 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
             {cours.map((c, idx) => {
               const inscrits = etudiants.filter(e => e.cours_id === c.id).length
               return (
-                <button key={c.id} onClick={() => setSelectedCours(c)}
-                  className="flex-shrink-0 w-40 bg-white rounded-2xl border border-[#E8E2DC] shadow-sm p-3.5 text-left active:scale-[0.97] transition-transform animate-card-in"
+                <button key={c.id} onClick={() => { setSelectedCours(c); setFilterCoursId(filterCoursId === c.id ? null : c.id) }}
+                  className={`flex-shrink-0 w-40 rounded-2xl border shadow-sm p-3.5 text-left active:scale-[0.97] transition-transform animate-card-in ${filterCoursId === c.id ? 'bg-[#1B2A8A] border-[#1B2A8A]' : 'bg-white border-[#E8E2DC]'}`}
                   style={{ animationDelay: `${Math.min(idx, 5) * 20}ms` }}>
                   <div className="flex items-center justify-between mb-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-[#1B2A8A]/10 flex items-center justify-center">
-                      <GraduationCap size={16} className="text-[#1B2A8A]" />
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${filterCoursId === c.id ? 'bg-white/20' : 'bg-[#1B2A8A]/10'}`}>
+                      <GraduationCap size={16} className={filterCoursId === c.id ? 'text-white' : 'text-[#1B2A8A]'} />
                     </div>
-                    <span className="flex items-center gap-1 text-[11px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-semibold">
+                    <span className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold ${filterCoursId === c.id ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
                       <Users size={9} />{inscrits}
                     </span>
                   </div>
-                  <p className="text-sm font-bold text-gray-900 leading-snug line-clamp-2">{c.nom}</p>
-                  {c.duree && <p className="text-[11px] text-gray-400 mt-1">{c.duree}</p>}
+                  <p className={`text-sm font-bold leading-snug line-clamp-2 ${filterCoursId === c.id ? 'text-white' : 'text-gray-900'}`}>{c.nom}</p>
+                  {c.duree && <p className={`text-[11px] mt-1 ${filterCoursId === c.id ? 'text-white/70' : 'text-gray-400'}`}>{c.duree}</p>}
                   {c.professeur && (
-                    <p className="text-[11px] text-[#1B2A8A] font-medium mt-1 truncate">{c.professeur}</p>
+                    <p className={`text-[11px] font-medium mt-1 truncate ${filterCoursId === c.id ? 'text-white/80' : 'text-[#1B2A8A]'}`}>{c.professeur}</p>
                   )}
                 </button>
               )
@@ -519,6 +565,12 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
             </div>
 
             <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+              {!selectedEtudiant.cours_id && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2">
+                  <AlertCircle size={15} className="text-amber-500 flex-shrink-0" />
+                  <p className="text-sm text-amber-800 font-semibold">Il faut lui assigner un cours avant d'encaisser des frais.</p>
+                </div>
+              )}
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Frais scolaires</p>
               {FRAIS_CONFIG.map(cfg => {
                 const total   = selectedEtudiant[cfg.key]  as number
@@ -529,7 +581,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                 return (
                   <div key={cfg.type} className="bg-white rounded-2xl p-4 border border-[#F0EDE8]">
                     <div className="flex items-center justify-between mb-2">
-                      <p className="font-semibold text-gray-800 text-sm">{cfg.label === 'Inscr.' ? 'Inscription' : cfg.label === 'V1' ? 'Formation V1' : 'Formation V2'}</p>
+                      <p className="font-semibold text-gray-800 text-sm">{cfg.fullLabel}</p>
                       {isPaid
                         ? <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full font-semibold"><Check size={10} />Payé</span>
                         : <span className="text-xs text-red-500 font-semibold">{fmt(restant)} restant</span>}
@@ -538,16 +590,15 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                       <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isPaid ? '#22c55e' : pct > 0 ? '#f97316' : '#e5e7eb' }} />
                     </div>
                     <p className="text-xs text-gray-400">{fmt(paye)} / {fmt(total)}</p>
+                    {!isPaid && (
+                      <button onClick={() => { onPayEtudiant(selectedEtudiant.id, cfg.type); setSelectedEtudiant(null) }}
+                        className="mt-2.5 w-full bg-[#A01020]/10 text-[#A01020] text-sm font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 active:bg-[#A01020]/20 transition-colors">
+                        <CreditCard size={13} />Payer — {fmt(restant)}
+                      </button>
+                    )}
                   </div>
                 )
               })}
-
-              {getDette(selectedEtudiant) > 0 && (
-                <button onClick={() => { onPayEtudiant(selectedEtudiant.id); setSelectedEtudiant(null) }}
-                  className="w-full bg-[#A01020] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-md">
-                  <CreditCard size={18} />Encaisser — {fmt(getDette(selectedEtudiant))}
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -579,18 +630,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                   <div key={row.label} className="flex items-center justify-between px-4 py-3">
                     <p className="text-sm text-gray-500">{row.label}</p>
                     <p className="text-sm font-semibold text-gray-900">{row.value}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-white rounded-2xl border border-[#F0EDE8] divide-y divide-[#F0EDE8]">
-                {[
-                  { label: 'Frais inscription',  value: fmt(selectedCours.frais_inscription)  },
-                  { label: 'Formation V1',        value: fmt(selectedCours.frais_formation_v1) },
-                  { label: 'Formation V2',        value: fmt(selectedCours.frais_formation_v2) },
-                ].map(row => (
-                  <div key={row.label} className="flex items-center justify-between px-4 py-3">
-                    <p className="text-sm text-gray-500">{row.label}</p>
-                    <p className="text-sm font-semibold text-[#1B2A8A]">{row.value}</p>
                   </div>
                 ))}
               </div>
@@ -670,19 +709,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                     className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Frais (HTG)</p>
-                <div className="space-y-3">
-                  {([['Inscription','frais_inscription'],['Formation V1','frais_formation_v1'],['Formation V2','frais_formation_v2']] as [string, keyof Cours][]).map(([label, field]) => (
-                    <div key={field}>
-                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                      <input type="number" value={editCours[field] as number}
-                        onChange={e => setEditCours({...editCours, [field]: parseFloat(e.target.value)||0})}
-                        className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
-                    </div>
-                  ))}
-                </div>
-              </div>
               <button onClick={saveCours} disabled={saving}
                 className="w-full bg-[#1B2A8A] text-white font-bold py-4 rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-transform shadow-md">
                 {saving ? 'Enregistrement...' : 'Enregistrer'}
@@ -729,8 +755,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Date de naissance</label>
-                <input type="date" value={formNaissance} onChange={e => setFormNaissance(e.target.value)}
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                <DOBPicker value={formNaissance} onChange={setFormNaissance} />
               </div>
 
               {/* Section contact */}
@@ -763,11 +788,11 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
               {/* Section scolarité */}
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Scolarité</p>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cours</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cours <span className="text-[#A01020]">*</span></label>
                 <div className="relative">
                   <select value={formCoursId} onChange={e => setFormCoursId(e.target.value)}
-                    className="w-full appearance-none bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A] pr-10">
-                    <option value="">Sélectionner un cours (optionnel)</option>
+                    className={`w-full appearance-none bg-white border rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A] pr-10 ${!formCoursId ? 'border-[#A01020]/40' : 'border-[#E8E2DC]'}`}>
+                    <option value="">— Sélectionner un cours —</option>
                     {cours.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
                   </select>
                   <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
@@ -832,21 +857,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                     className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Frais (HTG)</p>
-                <div className="space-y-3">
-                  {([["Inscription", newCoursInscription, setNewCoursInscription],
-                    ['Formation V1', newCoursV1, setNewCoursV1],
-                    ['Formation V2', newCoursV2, setNewCoursV2],
-                  ] as [string, string, (v: string) => void][]).map(([label, val, setter]) => (
-                    <div key={label}>
-                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                      <input type="number" value={val} onChange={e => setter(e.target.value)}
-                        className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
-                    </div>
-                  ))}
-                </div>
-              </div>
               <button type="submit" disabled={saving}
                 className="w-full bg-[#1B2A8A] text-white font-bold py-4 rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-transform shadow-md">
                 {saving ? 'Enregistrement...' : 'Enregistrer'}
@@ -882,8 +892,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                   </button>
                 ))}
               </div>
-              <input type="date" value={editData.date_naissance || ''} onChange={e => setEditData({...editData, date_naissance: e.target.value})}
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+              <DOBPicker value={editData.date_naissance || ''} onChange={v => setEditData({...editData, date_naissance: v})} />
 
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Contact</p>
               <input type="tel" value={editData.contact || ''} onChange={e => setEditData({...editData, contact: e.target.value})}
@@ -905,16 +914,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                 <option value="">— Sans cours —</option>
                 {cours.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
               </select>
-              <div className="grid grid-cols-3 gap-2">
-                {([['Inscription','frais_inscription'],['V1','frais_formation_v1'],['V2','frais_formation_v2']] as [string, keyof Etudiant][]).map(([label, field]) => (
-                  <div key={field}>
-                    <label className="text-xs text-gray-500 mb-1 block">{label} (HTG)</label>
-                    <input type="number" value={editData[field] as number}
-                      onChange={e => setEditData({...editData, [field]: parseFloat(e.target.value)||0})}
-                      className="w-full bg-white border border-[#E8E2DC] rounded-xl px-2 py-2.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
-                  </div>
-                ))}
-              </div>
 
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Notes</p>
               <textarea value={editData.notes || ''} onChange={e => setEditData({...editData, notes: e.target.value})}

@@ -22,10 +22,6 @@ export interface Cours {
   horaire?: string
   duree?: string
   professeur?: string
-  frais_inscription: number
-  frais_formation_v1: number
-  frais_formation_v2: number
-  frais_graduation: number
   actif: boolean
   created_at: string
 }

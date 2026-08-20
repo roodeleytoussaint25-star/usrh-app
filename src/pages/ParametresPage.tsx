@@ -4,9 +4,16 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Plus, Eye, EyeOff, X, LogOut } from 'lucide-react'
 import type { Employe } from '@/types'
 
+const FRAIS_LABELS: { key: string; label: string }[] = [
+  { key: 'frais_inscription',  label: 'Inscription' },
+  { key: 'frais_formation_v1', label: 'Document' },
+  { key: 'frais_formation_v2', label: 'Premier versement' },
+  { key: 'frais_graduation',   label: 'Graduation' },
+]
+
 export function ParametresPage() {
   const { logout } = useAuth()
-  const [tab, setTab] = useState<'employes' | 'mdp' | 'infos'>('employes')
+  const [tab, setTab] = useState<'employes' | 'frais' | 'mdp' | 'infos'>('employes')
   const [employes, setEmployes] = useState<Employe[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [newNom, setNewNom] = useState('')
@@ -19,9 +26,34 @@ export function ParametresPage() {
   const [mdpMsg, setMdpMsg] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Frais école
+  const [fraisValues, setFraisValues] = useState<Record<string, string>>({})
+  const [fraisMsg, setFraisMsg] = useState('')
+
   useEffect(() => {
     if (tab === 'employes') loadEmployes()
+    if (tab === 'frais') loadFrais()
   }, [tab])
+
+  const loadFrais = async () => {
+    const { data } = await supabase.from('usr_config').select('key,value').in('key', FRAIS_LABELS.map(f => f.key))
+    const vals: Record<string, string> = {}
+    for (const r of data || []) vals[r.key] = r.value
+    setFraisValues(vals)
+  }
+
+  const saveFrais = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    await Promise.all(
+      FRAIS_LABELS.map(({ key }) =>
+        supabase.from('usr_config').upsert({ key, value: fraisValues[key] ?? '0' }, { onConflict: 'key' })
+      )
+    )
+    setSaving(false)
+    setFraisMsg('Frais mis à jour !')
+    setTimeout(() => setFraisMsg(''), 2500)
+  }
 
   const loadEmployes = async () => {
     const { data } = await supabase.from('usr_employes').select('*').eq('actif', true).order('nom')
@@ -60,7 +92,7 @@ export function ParametresPage() {
     <div className="flex flex-col h-[calc(100vh-56px)]">
       {/* Tabs */}
       <div className="flex border-b border-gray-200 bg-white">
-        {(['employes', 'mdp', 'infos'] as const).map(t => (
+        {(['employes', 'frais', 'mdp', 'infos'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -68,7 +100,7 @@ export function ParametresPage() {
               tab === t ? 'text-[#A01020] border-b-2 border-[#A01020]' : 'text-gray-400'
             }`}
           >
-            {t === 'employes' ? 'Employés' : t === 'mdp' ? 'Mot de passe' : 'Infos'}
+            {t === 'employes' ? 'Employés' : t === 'frais' ? 'Frais' : t === 'mdp' ? 'Mdp' : 'Infos'}
           </button>
         ))}
       </div>
@@ -113,6 +145,33 @@ export function ParametresPage() {
               ))}
             </div>
           </>
+        )}
+
+        {/* Frais école */}
+        {tab === 'frais' && (
+          <form onSubmit={saveFrais} className="space-y-4">
+            <p className="text-xs text-gray-400">Ces montants s'appliquent à tous les nouveaux étudiants inscrits.</p>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              {FRAIS_LABELS.map(({ key, label }) => (
+                <div key={key}>
+                  <label className="block text-xs text-gray-500 font-semibold mb-1">{label} (HTG)</label>
+                  <input
+                    type="number"
+                    value={fraisValues[key] ?? ''}
+                    onChange={e => setFraisValues(prev => ({ ...prev, [key]: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#1B2A8A]"
+                    min="0"
+                    step="100"
+                  />
+                </div>
+              ))}
+            </div>
+            {fraisMsg && <p className="text-sm text-green-600 font-semibold">{fraisMsg}</p>}
+            <button type="submit" disabled={saving}
+              className="w-full bg-[#A01020] text-white py-3 rounded-xl font-bold disabled:opacity-50">
+              {saving ? '...' : 'Enregistrer les frais'}
+            </button>
+          </form>
         )}
 
         {/* Mot de passe admin */}
