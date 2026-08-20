@@ -3,11 +3,11 @@ import { supabase } from '@/lib/supabase'
 import {
   Plus, Search, GraduationCap, Pencil, Trash2, X,
   Phone, Check, Users, CreditCard, Clock, AlertCircle, CheckCircle,
-  Mail, MapPin, StickyNote, Calendar,
+  Mail, MapPin, StickyNote, Calendar, BookOpen, Clock3, UserCheck,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
-import type { Etudiant } from '@/types'
+import type { Etudiant, Cours } from '@/types'
 
 type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation'
 
@@ -65,11 +65,268 @@ function DOBPicker({ value, onChange }: { value: string; onChange: (v: string) =
 
 interface Props { onPayEtudiant: (id: number, fraisType?: TypeFrais) => void }
 
+// ─────────────────────────────────────────────
+// VUE COURS
+// ─────────────────────────────────────────────
+function CoursView() {
+  const { showToast } = useToast()
+  const [cours, setCours] = useState<Cours[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [editData, setEditData] = useState<Cours | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+
+  const emptyForm = { nom: '', horaire: '', duree: '', professeur: '', frais_inscription: '', frais_formation_v1: '', frais_formation_v2: '', frais_graduation: '' }
+  const [form, setForm] = useState(emptyForm)
+
+  useEffect(() => { load() }, [])
+
+  const load = async () => {
+    const { data } = await supabase.from('usr_cours').select('*').eq('actif', true).order('nom')
+    setCours(data || [])
+    setLoading(false)
+  }
+
+  const openCreate = () => { setForm(emptyForm); setShowForm(true) }
+  const openEdit = (c: Cours) => {
+    setEditData(c)
+    setForm({
+      nom: c.nom,
+      horaire: c.horaire || '',
+      duree: c.duree || '',
+      professeur: c.professeur || '',
+      frais_inscription: c.frais_inscription != null ? String(c.frais_inscription) : '',
+      frais_formation_v1: c.frais_formation_v1 != null ? String(c.frais_formation_v1) : '',
+      frais_formation_v2: c.frais_formation_v2 != null ? String(c.frais_formation_v2) : '',
+      frais_graduation: c.frais_graduation != null ? String(c.frais_graduation) : '',
+    })
+  }
+
+  const saveForm = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.nom.trim()) return
+    setSaving(true)
+    const payload = {
+      nom: form.nom.trim(),
+      horaire: form.horaire.trim() || null,
+      duree: form.duree.trim() || null,
+      professeur: form.professeur.trim() || null,
+      frais_inscription: form.frais_inscription ? parseFloat(form.frais_inscription) : null,
+      frais_formation_v1: form.frais_formation_v1 ? parseFloat(form.frais_formation_v1) : null,
+      frais_formation_v2: form.frais_formation_v2 ? parseFloat(form.frais_formation_v2) : null,
+      frais_graduation: form.frais_graduation ? parseFloat(form.frais_graduation) : null,
+    }
+    if (editData) {
+      await supabase.from('usr_cours').update(payload).eq('id', editData.id)
+      showToast('Cours mis à jour')
+      setEditData(null)
+    } else {
+      await supabase.from('usr_cours').insert(payload)
+      showToast('Cours créé')
+      setShowForm(false)
+    }
+    setSaving(false)
+    load()
+  }
+
+  const archiver = async (id: number) => {
+    await supabase.from('usr_cours').update({ actif: false }).eq('id', id)
+    setCours(prev => prev.filter(c => c.id !== id))
+    setConfirmDeleteId(null)
+    showToast('Cours archivé')
+  }
+
+  if (loading) return (
+    <div className="px-4 pt-4 space-y-3">
+      {[1,2].map(i => <div key={i} className="bg-white rounded-2xl h-28 animate-pulse border border-[#F0EDE8]" />)}
+    </div>
+  )
+
+  const formModal = (isEdit: boolean) => (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-end"
+      onClick={e => { if (e.target === e.currentTarget) { isEdit ? setEditData(null) : setShowForm(false) } }}>
+      <form onSubmit={saveForm} className="bg-[#FAF7F4] w-full rounded-t-3xl animate-modal-up max-h-[92vh] overflow-auto">
+        <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
+        <div className="flex items-center justify-between px-5 pt-3 pb-4">
+          <h3 className="text-lg font-bold text-gray-900">{isEdit ? 'Modifier le cours' : 'Nouveau cours'}</h3>
+          <button type="button" onClick={() => isEdit ? setEditData(null) : setShowForm(false)}
+            className="w-8 h-8 rounded-full bg-white border border-[#E8E2DC] flex items-center justify-center">
+            <X size={15} className="text-gray-500" />
+          </button>
+        </div>
+        <div className="px-5 space-y-4 pb-8">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Informations</p>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nom du cours *</label>
+            <input type="text" value={form.nom} onChange={e => setForm(f => ({...f, nom: e.target.value}))}
+              placeholder="Ex: Sécurité rapprochée niveau 1" required autoFocus
+              className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Professeur</label>
+            <input type="text" value={form.professeur} onChange={e => setForm(f => ({...f, professeur: e.target.value}))}
+              placeholder="Ex: Jean-Pierre Dumont"
+              className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Horaire</label>
+              <input type="text" value={form.horaire} onChange={e => setForm(f => ({...f, horaire: e.target.value}))}
+                placeholder="Ex: Lun-Mer 8h-12h"
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Durée</label>
+              <input type="text" value={form.duree} onChange={e => setForm(f => ({...f, duree: e.target.value}))}
+                placeholder="Ex: 6 mois"
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Frais (optionnel)</p>
+          <p className="text-xs text-gray-400 -mt-2">Si remplis, ces montants sont appliqués automatiquement à l'inscription d'un étudiant dans ce cours.</p>
+          {[
+            { key: 'frais_inscription', label: 'Inscription' },
+            { key: 'frais_formation_v1', label: 'Document' },
+            { key: 'frais_formation_v2', label: 'Premier versement' },
+            { key: 'frais_graduation', label: 'Graduation' },
+          ].map(f => (
+            <div key={f.key}>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">{f.label} (HTG)</label>
+              <input type="number" min="0" value={form[f.key as keyof typeof form]}
+                onChange={e => setForm(prev => ({...prev, [f.key]: e.target.value}))}
+                placeholder="0"
+                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+            </div>
+          ))}
+
+          <button type="submit" disabled={saving}
+            className="w-full bg-[#1B2A8A] text-white font-bold py-4 rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-transform shadow-md mt-2">
+            {saving ? 'Enregistrement...' : isEdit ? 'Mettre à jour' : 'Créer le cours'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-56px)] overflow-auto">
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BookOpen size={17} className="text-[#1B2A8A]" />
+          <span className="text-sm font-bold text-gray-900">Cours ({cours.length})</span>
+        </div>
+        <button onClick={openCreate}
+          className="flex items-center gap-1.5 bg-[#1B2A8A] text-white px-3 py-1.5 rounded-xl text-xs font-bold active:scale-95 transition-transform">
+          <Plus size={13} />Nouveau cours
+        </button>
+      </div>
+
+      <div className="px-4 pb-6 space-y-3">
+        {cours.length === 0 && (
+          <div className="bg-white rounded-2xl p-10 text-center border border-[#F0EDE8]">
+            <div className="w-12 h-12 rounded-2xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-3">
+              <BookOpen size={22} className="text-[#1B2A8A]/40" />
+            </div>
+            <p className="text-sm font-semibold text-gray-500">Aucun cours créé</p>
+            <p className="text-xs text-gray-400 mt-1">Créez votre premier cours pour commencer</p>
+          </div>
+        )}
+
+        {cours.map((c, idx) => (
+          <div key={c.id} className="bg-white rounded-2xl border border-[#F0EDE8] shadow-sm overflow-hidden animate-card-in" style={{ animationDelay: `${Math.min(idx, 6) * 20}ms` }}>
+            <div className="px-4 pt-4 pb-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#1B2A8A] flex items-center justify-center flex-shrink-0">
+                  <BookOpen size={18} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-gray-900 text-sm">{c.nom}</p>
+                  {c.professeur && (
+                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                      <UserCheck size={10} />{c.professeur}
+                    </p>
+                  )}
+                  <div className="flex gap-3 mt-1.5">
+                    {c.horaire && (
+                      <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <Clock3 size={10} className="text-[#1B2A8A]" />{c.horaire}
+                      </span>
+                    )}
+                    {c.duree && (
+                      <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <Clock size={10} className="text-[#1B2A8A]" />{c.duree}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {(c.frais_inscription || c.frais_formation_v1 || c.frais_formation_v2 || c.frais_graduation) && (
+                <div className="mt-3 grid grid-cols-2 gap-1.5">
+                  {[
+                    { label: 'Inscription', val: c.frais_inscription },
+                    { label: 'Document', val: c.frais_formation_v1 },
+                    { label: '1er versement', val: c.frais_formation_v2 },
+                    { label: 'Graduation', val: c.frais_graduation },
+                  ].filter(f => f.val).map(f => (
+                    <div key={f.label} className="bg-[#F0F2F5] rounded-xl px-3 py-2">
+                      <p className="text-[10px] text-gray-400">{f.label}</p>
+                      <p className="text-xs font-bold text-gray-700">{fmt(f.val!)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex border-t border-[#F0EDE8]">
+              <button onClick={() => openEdit(c)}
+                className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[11px] text-gray-500 font-semibold active:bg-gray-50">
+                <Pencil size={11} />Modifier
+              </button>
+              <div className="w-px bg-[#F0EDE8]" />
+              <button onClick={() => setConfirmDeleteId(c.id)}
+                className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[11px] text-red-400 font-semibold active:bg-red-50">
+                <Trash2 size={11} />Archiver
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showForm && formModal(false)}
+      {editData && formModal(true)}
+
+      {confirmDeleteId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl">
+            <p className="font-bold text-gray-900 text-center mb-2">Archiver ce cours ?</p>
+            <p className="text-sm text-gray-400 text-center mb-6">Les étudiants inscrits ne seront pas supprimés.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDeleteId(null)}
+                className="flex-1 border border-[#E8E2DC] text-gray-600 py-3 rounded-2xl text-sm font-semibold">Annuler</button>
+              <button onClick={() => archiver(confirmDeleteId)}
+                className="flex-1 bg-red-500 text-white py-3 rounded-2xl text-sm font-bold">Archiver</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────
+// VUE ÉTUDIANTS
+// ─────────────────────────────────────────────
 export function EtudiantsPage({ onPayEtudiant }: Props) {
   const { } = useAuth()
   const { showToast } = useToast()
 
+  const [activeTab, setActiveTab] = useState<'etudiants' | 'cours'>('etudiants')
+
   const [etudiants, setEtudiants]   = useState<Etudiant[]>([])
+  const [coursList, setCoursList]   = useState<Cours[]>([])
   const [fraisConfig, setFraisConfig] = useState<Record<string, number>>({})
   const [loading, setLoading]       = useState(true)
   const [search, setSearch]         = useState('')
@@ -77,7 +334,6 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const [filterStatus, setFilterStatus] = useState<'tous' | 'retards' | 'ajour'>('tous')
   const [sortBy, setSortBy]         = useState<'az' | 'dette'>('az')
 
-  // Ajouter étudiant
   const [showForm, setShowForm]           = useState(false)
   const [formNom, setFormNom]             = useState('')
   const [formContact, setFormContact]     = useState('')
@@ -87,8 +343,8 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   const [formAdresse, setFormAdresse]     = useState('')
   const [formUrgence, setFormUrgence]     = useState('')
   const [formNotes, setFormNotes]         = useState('')
+  const [formCoursId, setFormCoursId]     = useState<number | ''>('')
 
-  // Modifier / Supprimer
   const [editData, setEditData]               = useState<Etudiant | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [selectedEtudiant, setSelectedEtudiant] = useState<Etudiant | null>(null)
@@ -96,15 +352,22 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   useEffect(() => { loadAll() }, [])
 
   const loadAll = async () => {
-    const [etuRes, cfgRes] = await Promise.all([
-      supabase.from('usr_etudiants').select('*').eq('actif', true).order('nom'),
+    const [etuRes, cfgRes, coursRes] = await Promise.all([
+      supabase.from('usr_etudiants').select('*, cours:cours_id(nom)').eq('actif', true).order('nom'),
       supabase.from('usr_config').select('key,value').in('key', ['frais_inscription','frais_formation_v1','frais_formation_v2','frais_graduation']),
+      supabase.from('usr_cours').select('*').eq('actif', true).order('nom'),
     ])
     setEtudiants(etuRes.data || [])
     const cfg: Record<string, number> = {}
     for (const r of cfgRes.data || []) cfg[r.key] = parseFloat(r.value) || 0
     setFraisConfig(cfg)
+    setCoursList(coursRes.data || [])
     setLoading(false)
+  }
+
+  const getCoursFreais = (coursId: number | '') => {
+    if (!coursId) return null
+    return coursList.find(c => c.id === coursId) || null
   }
 
   const ajouterEtudiant = async (e: React.FormEvent) => {
@@ -112,8 +375,10 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     const nom = formNom.trim()
     if (!nom) return
     setSaving(true)
+    const cf = getCoursFreais(formCoursId)
     await supabase.from('usr_etudiants').insert({
       nom,
+      cours_id:         formCoursId || null,
       contact:          formContact.trim() || null,
       email:            formEmail.trim()   || null,
       sexe:             formSexe           || null,
@@ -121,14 +386,15 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
       adresse:          formAdresse.trim() || null,
       contact_urgence:  formUrgence.trim() || null,
       notes:            formNotes.trim()   || null,
-      frais_inscription:  fraisConfig['frais_inscription']  ?? 5000,
-      frais_formation_v1: fraisConfig['frais_formation_v1'] ?? 30000,
-      frais_formation_v2: fraisConfig['frais_formation_v2'] ?? 30000,
-      frais_graduation:   fraisConfig['frais_graduation']   ?? 0,
+      frais_inscription:  cf?.frais_inscription  ?? fraisConfig['frais_inscription']  ?? 5000,
+      frais_formation_v1: cf?.frais_formation_v1 ?? fraisConfig['frais_formation_v1'] ?? 30000,
+      frais_formation_v2: cf?.frais_formation_v2 ?? fraisConfig['frais_formation_v2'] ?? 30000,
+      frais_graduation:   cf?.frais_graduation   ?? fraisConfig['frais_graduation']   ?? 0,
     })
     setSaving(false)
     setFormNom(''); setFormContact(''); setFormEmail(''); setFormSexe('')
     setFormNaissance(''); setFormAdresse(''); setFormUrgence(''); setFormNotes('')
+    setFormCoursId('')
     setShowForm(false)
     showToast(`${nom} inscrit`)
     loadAll()
@@ -139,6 +405,7 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     setSaving(true)
     await supabase.from('usr_etudiants').update({
       nom:             editData.nom.trim(),
+      cours_id:        editData.cours_id || null,
       contact:         editData.contact         || null,
       email:           editData.email           || null,
       sexe:            editData.sexe            || null,
@@ -184,6 +451,9 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
     })
     .sort((a, b) => sortBy === 'dette' ? getDette(b) - getDette(a) : a.nom.localeCompare(b.nom))
 
+  const inputCls = "w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]"
+  const selectCls = "w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A] appearance-none"
+
   if (loading) return (
     <div className="p-4 space-y-3">
       {[1,2,3].map(i => <div key={i} className="bg-white rounded-2xl h-24 animate-pulse border border-[#F0EDE8]" />)}
@@ -191,178 +461,214 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
   )
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] overflow-auto">
+    <div className="flex flex-col h-[calc(100vh-56px)] overflow-hidden">
 
-      {/* ── EN-TÊTE ── */}
-      <div className="px-4 pt-4 pb-1">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Users size={17} className="text-[#1B2A8A]" />
-            <span className="text-sm font-bold text-gray-900">Étudiants ({etudiants.length})</span>
-          </div>
-          <button onClick={() => setShowForm(true)}
-            className="flex items-center gap-1.5 bg-[#1B2A8A] text-white px-3 py-1.5 rounded-xl text-xs font-bold active:scale-95 transition-transform">
-            <Plus size={13} />Inscrire
-          </button>
-        </div>
-
-        {etudiants.length > 0 && (
-          <>
-            <div className="relative mb-2">
-              <Search size={14} className="absolute left-3 top-3 text-gray-400 pointer-events-none" />
-              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Rechercher..."
-                className="w-full bg-white border border-[#E8E2DC] rounded-xl pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#1B2A8A] shadow-sm" />
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {([
-                { key: 'tous',    label: 'Tous',    count: etudiants.length },
-                { key: 'retards', label: 'Retards', count: nbRetards },
-                { key: 'ajour',   label: 'À jour',  count: etudiants.length - nbRetards },
-              ] as { key: 'tous'|'retards'|'ajour'; label: string; count: number }[]).map(f => (
-                <button key={f.key} onClick={() => setFilterStatus(f.key)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                    filterStatus === f.key
-                      ? f.key === 'retards' ? 'bg-[#A01020] text-white border-[#A01020]'
-                        : f.key === 'ajour' ? 'bg-green-500 text-white border-green-500'
-                        : 'bg-[#1B2A8A] text-white border-[#1B2A8A]'
-                      : 'bg-white text-gray-600 border-[#E8E2DC]'
-                  }`}>
-                  {f.label}
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${filterStatus === f.key ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{f.count}</span>
-                </button>
-              ))}
-              <button onClick={() => setSortBy(s => s === 'az' ? 'dette' : 'az')}
-                className={`ml-auto flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                  sortBy === 'dette' ? 'bg-[#1B2A8A]/10 text-[#1B2A8A] border-[#1B2A8A]/30' : 'bg-white text-gray-500 border-[#E8E2DC]'
+      {/* ── TABS ── */}
+      <div className="px-4 pt-3 pb-0 flex-shrink-0">
+        <div className="flex bg-[#F0F2F5] rounded-2xl p-1 gap-1">
+          {([
+            { key: 'etudiants', label: 'Étudiants', icon: Users },
+            { key: 'cours',     label: 'Cours',      icon: BookOpen },
+          ] as { key: 'etudiants'|'cours'; label: string; icon: React.ElementType }[]).map(tab => {
+            const Icon = tab.icon
+            return (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === tab.key
+                    ? 'bg-white text-[#1B2A8A] shadow-sm'
+                    : 'text-gray-400'
                 }`}>
-                {sortBy === 'dette' ? '↓ Dette' : 'A → Z'}
+                <Icon size={14} />{tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── CONTENU ── */}
+      {activeTab === 'cours' ? (
+        <div className="flex-1 overflow-auto">
+          <CoursView />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          {/* EN-TÊTE ÉTUDIANTS */}
+          <div className="px-4 pt-3 pb-1">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Users size={17} className="text-[#1B2A8A]" />
+                <span className="text-sm font-bold text-gray-900">Étudiants ({etudiants.length})</span>
+              </div>
+              <button onClick={() => setShowForm(true)}
+                className="flex items-center gap-1.5 bg-[#1B2A8A] text-white px-3 py-1.5 rounded-xl text-xs font-bold active:scale-95 transition-transform">
+                <Plus size={13} />Inscrire
               </button>
             </div>
 
-            {(search || filterStatus !== 'tous') && (
-              <p className="text-xs text-gray-400 mt-1">
-                {filtered.length} étudiant{filtered.length !== 1 ? 's' : ''}
-                {filterStatus === 'retards' && ` · ${fmt(filtered.reduce((s, e) => s + getDette(e), 0))} total dû`}
-              </p>
+            {etudiants.length > 0 && (
+              <>
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-3 top-3 text-gray-400 pointer-events-none" />
+                  <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Rechercher..."
+                    className="w-full bg-white border border-[#E8E2DC] rounded-xl pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#1B2A8A] shadow-sm" />
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {([
+                    { key: 'tous',    label: 'Tous',    count: etudiants.length },
+                    { key: 'retards', label: 'Retards', count: nbRetards },
+                    { key: 'ajour',   label: 'À jour',  count: etudiants.length - nbRetards },
+                  ] as { key: 'tous'|'retards'|'ajour'; label: string; count: number }[]).map(f => (
+                    <button key={f.key} onClick={() => setFilterStatus(f.key)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                        filterStatus === f.key
+                          ? f.key === 'retards' ? 'bg-[#A01020] text-white border-[#A01020]'
+                            : f.key === 'ajour' ? 'bg-green-500 text-white border-green-500'
+                            : 'bg-[#1B2A8A] text-white border-[#1B2A8A]'
+                          : 'bg-white text-gray-600 border-[#E8E2DC]'
+                      }`}>
+                      {f.label}
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${filterStatus === f.key ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{f.count}</span>
+                    </button>
+                  ))}
+                  <button onClick={() => setSortBy(s => s === 'az' ? 'dette' : 'az')}
+                    className={`ml-auto flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                      sortBy === 'dette' ? 'bg-[#1B2A8A]/10 text-[#1B2A8A] border-[#1B2A8A]/30' : 'bg-white text-gray-500 border-[#E8E2DC]'
+                    }`}>
+                    {sortBy === 'dette' ? '↓ Dette' : 'A → Z'}
+                  </button>
+                </div>
+
+                {(search || filterStatus !== 'tous') && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    {filtered.length} étudiant{filtered.length !== 1 ? 's' : ''}
+                    {filterStatus === 'retards' && ` · ${fmt(filtered.reduce((s, e) => s + getDette(e), 0))} total dû`}
+                  </p>
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
-
-      {/* ── LISTE ── */}
-      <div className="px-4 pb-6 pt-3 space-y-2.5">
-        {etudiants.length === 0 && (
-          <div className="bg-white rounded-2xl p-10 text-center border border-[#F0EDE8] animate-fade-in">
-            <div className="w-12 h-12 rounded-2xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-3">
-              <GraduationCap size={22} className="text-[#1B2A8A]/40" />
-            </div>
-            <p className="text-sm font-semibold text-gray-500">Aucun étudiant inscrit</p>
           </div>
-        )}
 
-        {etudiants.length > 0 && filtered.length === 0 && (
-          <div className="bg-white rounded-2xl p-8 text-center border border-[#F0EDE8] animate-fade-in">
-            <CheckCircle size={24} className="text-green-400 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-gray-500">
-              {filterStatus === 'retards' ? 'Aucun retard' : 'Aucun résultat'}
-            </p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {filterStatus === 'retards' ? 'Tous les étudiants sont à jour !' : 'Essayez un autre filtre'}
-            </p>
-          </div>
-        )}
+          {/* LISTE */}
+          <div className="px-4 pb-6 pt-3 space-y-2.5">
+            {etudiants.length === 0 && (
+              <div className="bg-white rounded-2xl p-10 text-center border border-[#F0EDE8] animate-fade-in">
+                <div className="w-12 h-12 rounded-2xl bg-[#1B2A8A]/8 flex items-center justify-center mx-auto mb-3">
+                  <GraduationCap size={22} className="text-[#1B2A8A]/40" />
+                </div>
+                <p className="text-sm font-semibold text-gray-500">Aucun étudiant inscrit</p>
+              </div>
+            )}
 
-        {filtered.map((etudiant, idx) => {
-          const status  = getStatus(etudiant)
-          const dette   = getDette(etudiant)
-          const hasDebt = dette > 0
-          const statusBar = status === 'paid' ? '#22c55e' : status === 'partial' ? '#f97316' : '#A01020'
+            {etudiants.length > 0 && filtered.length === 0 && (
+              <div className="bg-white rounded-2xl p-8 text-center border border-[#F0EDE8] animate-fade-in">
+                <CheckCircle size={24} className="text-green-400 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-gray-500">
+                  {filterStatus === 'retards' ? 'Aucun retard' : 'Aucun résultat'}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {filterStatus === 'retards' ? 'Tous les étudiants sont à jour !' : 'Essayez un autre filtre'}
+                </p>
+              </div>
+            )}
 
-          return (
-            <div key={etudiant.id} className="bg-white rounded-2xl border border-[#F0EDE8] shadow-sm overflow-hidden flex animate-card-in" style={{ animationDelay: `${Math.min(idx, 6) * 20}ms` }}>
-              <div className="w-1 flex-shrink-0 rounded-l-2xl" style={{ background: statusBar }} />
-              <div className="flex-1 min-w-0">
-                <button onClick={() => setSelectedEtudiant(etudiant)} className="w-full text-left px-3.5 pt-3.5 pb-2 active:bg-gray-50">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#1B2A8A] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                      {getInitials(etudiant.nom)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-bold text-gray-900 text-sm truncate">{etudiant.nom}</p>
-                        {status === 'paid' && (
-                          <span className="flex items-center gap-1 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
-                            <Check size={9} />Payé
-                          </span>
-                        )}
-                        {status === 'partial' && (
-                          <span className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
-                            <Clock size={9} />Partiel
-                          </span>
-                        )}
-                        {status === 'unpaid' && (
-                          <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
-                            <AlertCircle size={9} />Dû
-                          </span>
-                        )}
+            {filtered.map((etudiant, idx) => {
+              const status  = getStatus(etudiant)
+              const dette   = getDette(etudiant)
+              const hasDebt = dette > 0
+              const statusBar = status === 'paid' ? '#22c55e' : status === 'partial' ? '#f97316' : '#A01020'
+
+              return (
+                <div key={etudiant.id} className="bg-white rounded-2xl border border-[#F0EDE8] shadow-sm overflow-hidden flex animate-card-in" style={{ animationDelay: `${Math.min(idx, 6) * 20}ms` }}>
+                  <div className="w-1 flex-shrink-0 rounded-l-2xl" style={{ background: statusBar }} />
+                  <div className="flex-1 min-w-0">
+                    <button onClick={() => setSelectedEtudiant(etudiant)} className="w-full text-left px-3.5 pt-3.5 pb-2 active:bg-gray-50">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#1B2A8A] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                          {getInitials(etudiant.nom)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-bold text-gray-900 text-sm truncate">{etudiant.nom}</p>
+                            {status === 'paid' && (
+                              <span className="flex items-center gap-1 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
+                                <Check size={9} />Payé
+                              </span>
+                            )}
+                            {status === 'partial' && (
+                              <span className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
+                                <Clock size={9} />Partiel
+                              </span>
+                            )}
+                            {status === 'unpaid' && (
+                              <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">
+                                <AlertCircle size={9} />Dû
+                              </span>
+                            )}
+                          </div>
+                          {etudiant.contact && (
+                            <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                              <Phone size={9} />{etudiant.contact}
+                            </p>
+                          )}
+                          {etudiant.cours && (
+                            <p className="text-xs text-[#1B2A8A] mt-0.5 flex items-center gap-1">
+                              <BookOpen size={9} />{etudiant.cours.nom}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      {etudiant.contact && (
-                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                          <Phone size={9} />{etudiant.contact}
-                        </p>
+
+                      <div className="flex gap-2 mt-3">
+                        {FRAIS_CONFIG.map(cfg => {
+                          const total = etudiant[cfg.key] as number
+                          const paye  = etudiant[cfg.paye] as number
+                          const pct   = total > 0 ? Math.round((paye / total) * 100) : 0
+                          return (
+                            <div key={cfg.type} className="flex-1">
+                              <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
+                                <span>{cfg.label}</span><span>{pct}%</span>
+                              </div>
+                              <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full"
+                                  style={{ width: `${pct}%`, background: pct >= 100 ? '#22c55e' : pct > 0 ? '#f97316' : '#e5e7eb' }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {hasDebt && <p className="text-xs font-bold text-[#A01020] mt-2">{fmt(dette)} restant</p>}
+                    </button>
+
+                    <div className="flex border-t border-[#F0EDE8]">
+                      <button onClick={() => setEditData({ ...etudiant })}
+                        className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-gray-500 font-semibold active:bg-gray-50">
+                        <Pencil size={11} />Modifier
+                      </button>
+                      <div className="w-px bg-[#F0EDE8]" />
+                      <button onClick={() => setConfirmDeleteId(etudiant.id)}
+                        className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-red-400 font-semibold active:bg-red-50">
+                        <Trash2 size={11} />Archiver
+                      </button>
+                      {hasDebt && (
+                        <>
+                          <div className="w-px bg-[#F0EDE8]" />
+                          <button onClick={() => onPayEtudiant(etudiant.id)}
+                            className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-[#A01020] font-bold active:bg-red-50">
+                            <CreditCard size={11} />Payer
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
-
-                  <div className="flex gap-2 mt-3">
-                    {FRAIS_CONFIG.map(cfg => {
-                      const total = etudiant[cfg.key] as number
-                      const paye  = etudiant[cfg.paye] as number
-                      const pct   = total > 0 ? Math.round((paye / total) * 100) : 0
-                      return (
-                        <div key={cfg.type} className="flex-1">
-                          <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
-                            <span>{cfg.label}</span><span>{pct}%</span>
-                          </div>
-                          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full"
-                              style={{ width: `${pct}%`, background: pct >= 100 ? '#22c55e' : pct > 0 ? '#f97316' : '#e5e7eb' }} />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {hasDebt && <p className="text-xs font-bold text-[#A01020] mt-2">{fmt(dette)} restant</p>}
-                </button>
-
-                <div className="flex border-t border-[#F0EDE8]">
-                  <button onClick={() => setEditData({ ...etudiant })}
-                    className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-gray-500 font-semibold active:bg-gray-50">
-                    <Pencil size={11} />Modifier
-                  </button>
-                  <div className="w-px bg-[#F0EDE8]" />
-                  <button onClick={() => setConfirmDeleteId(etudiant.id)}
-                    className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-red-400 font-semibold active:bg-red-50">
-                    <Trash2 size={11} />Archiver
-                  </button>
-                  {hasDebt && (
-                    <>
-                      <div className="w-px bg-[#F0EDE8]" />
-                      <button onClick={() => onPayEtudiant(etudiant.id)}
-                        className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] text-[#A01020] font-bold active:bg-red-50">
-                        <CreditCard size={11} />Payer
-                      </button>
-                    </>
-                  )}
                 </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── DÉTAIL ÉTUDIANT ── */}
       {selectedEtudiant && (
@@ -377,7 +683,14 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
                   <div className="w-12 h-12 rounded-2xl bg-[#1B2A8A] flex items-center justify-center flex-shrink-0">
                     <span className="text-lg font-black text-white">{selectedEtudiant.nom[0].toUpperCase()}</span>
                   </div>
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{selectedEtudiant.nom}</h3>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900 leading-tight">{selectedEtudiant.nom}</h3>
+                    {selectedEtudiant.cours && (
+                      <p className="text-xs text-[#1B2A8A] flex items-center gap-1 mt-0.5">
+                        <BookOpen size={10} />{selectedEtudiant.cours.nom}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <button onClick={() => setSelectedEtudiant(null)}
                   className="w-8 h-8 rounded-full bg-white border border-[#E8E2DC] flex items-center justify-center shadow-sm flex-shrink-0">
@@ -461,12 +774,31 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
             </div>
             <div className="px-5 space-y-4 pb-8">
 
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Cours</p>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cours suivi</label>
+                <select value={formCoursId} onChange={e => setFormCoursId(e.target.value ? Number(e.target.value) : '')}
+                  className={selectCls}>
+                  <option value="">Aucun cours sélectionné</option>
+                  {coursList.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+                </select>
+                {formCoursId && (() => {
+                  const cf = getCoursFreais(formCoursId)
+                  if (!cf || (!cf.frais_inscription && !cf.frais_formation_v1)) return null
+                  return (
+                    <p className="text-xs text-[#1B2A8A] mt-1.5 flex items-center gap-1">
+                      <Check size={10} />Les frais de ce cours seront appliqués automatiquement
+                    </p>
+                  )
+                })()}
+              </div>
+
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Identité</p>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nom complet *</label>
                 <input type="text" value={formNom} onChange={e => setFormNom(e.target.value)}
                   placeholder="Ex: Jean Pierre" required autoFocus
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  className={inputCls} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Sexe</label>
@@ -489,26 +821,22 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Téléphone</label>
                 <input type="tel" value={formContact} onChange={e => setFormContact(e.target.value)}
-                  placeholder="Ex: 509 3700 0000"
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  placeholder="Ex: 509 3700 0000" className={inputCls} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email</label>
                 <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)}
-                  placeholder="Ex: jean@email.com"
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  placeholder="Ex: jean@email.com" className={inputCls} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Adresse</label>
                 <input type="text" value={formAdresse} onChange={e => setFormAdresse(e.target.value)}
-                  placeholder="Ex: Rue Pavée, Port-au-Prince"
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  placeholder="Ex: Rue Pavée, Port-au-Prince" className={inputCls} />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Contact d'urgence</label>
                 <input type="tel" value={formUrgence} onChange={e => setFormUrgence(e.target.value)}
-                  placeholder="Nom + téléphone proche"
-                  className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  placeholder="Nom + téléphone proche" className={inputCls} />
               </div>
 
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Notes</p>
@@ -539,10 +867,17 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
             </div>
             <div className="px-5 pb-8 space-y-4">
 
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Cours</p>
+              <select value={editData.cours_id || ''}
+                onChange={e => setEditData({...editData, cours_id: e.target.value ? Number(e.target.value) : undefined})}
+                className={selectCls}>
+                <option value="">Aucun cours</option>
+                {coursList.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+              </select>
+
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Identité</p>
               <input type="text" value={editData.nom} onChange={e => setEditData({...editData, nom: e.target.value})}
-                placeholder="Nom complet *"
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                placeholder="Nom complet *" className={inputCls} />
               <div className="flex gap-3">
                 {(['M','F'] as const).map(s => (
                   <button key={s} type="button" onClick={() => setEditData({...editData, sexe: editData.sexe === s ? undefined : s})}
@@ -556,17 +891,13 @@ export function EtudiantsPage({ onPayEtudiant }: Props) {
 
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Contact</p>
               <input type="tel" value={editData.contact || ''} onChange={e => setEditData({...editData, contact: e.target.value})}
-                placeholder="Téléphone"
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                placeholder="Téléphone" className={inputCls} />
               <input type="email" value={editData.email || ''} onChange={e => setEditData({...editData, email: e.target.value})}
-                placeholder="Email"
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                placeholder="Email" className={inputCls} />
               <input type="text" value={editData.adresse || ''} onChange={e => setEditData({...editData, adresse: e.target.value})}
-                placeholder="Adresse"
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                placeholder="Adresse" className={inputCls} />
               <input type="text" value={editData.contact_urgence || ''} onChange={e => setEditData({...editData, contact_urgence: e.target.value})}
-                placeholder="Contact d'urgence"
-                className="w-full bg-white border border-[#E8E2DC] rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                placeholder="Contact d'urgence" className={inputCls} />
 
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest pt-1">Notes</p>
               <textarea value={editData.notes || ''} onChange={e => setEditData({...editData, notes: e.target.value})}
