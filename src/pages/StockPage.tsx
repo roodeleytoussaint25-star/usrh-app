@@ -28,20 +28,24 @@ export function StockPage() {
   const [entreeQty, setEntreeQty]   = useState('')
 
   // Modifier (bottom sheet)
-  const [editArticle, setEditArticle]     = useState<Article | null>(null)
-  const [editNom, setEditNom]             = useState('')
-  const [editPrix, setEditPrix]           = useState('')
-  const [editPrixAchat, setEditPrixAchat] = useState('')
-  const [editTypeAchat, setEditTypeAchat] = useState<'unitaire' | 'gros'>('unitaire')
-  const [saving, setSaving]               = useState(false)
+  const [editArticle, setEditArticle]         = useState<Article | null>(null)
+  const [editNom, setEditNom]                 = useState('')
+  const [editPrix, setEditPrix]               = useState('')
+  const [editPrixAchat, setEditPrixAchat]     = useState('')
+  const [editTypeAchat, setEditTypeAchat]     = useState<'unitaire' | 'gros'>('unitaire')
+  const [editUnites, setEditUnites]           = useState('1')
+  const [editPrixLot, setEditPrixLot]         = useState('0')
+  const [saving, setSaving]                   = useState(false)
 
   // Nouveau produit (bottom sheet)
-  const [showAdd, setShowAdd]         = useState(false)
-  const [newNom, setNewNom]           = useState('')
-  const [newPrix, setNewPrix]         = useState('')
-  const [newPrixAchat, setNewPrixAchat] = useState('')
-  const [newTypeAchat, setNewTypeAchat] = useState<'unitaire' | 'gros'>('unitaire')
-  const [newStock, setNewStock]       = useState('0')
+  const [showAdd, setShowAdd]             = useState(false)
+  const [newNom, setNewNom]               = useState('')
+  const [newPrix, setNewPrix]             = useState('')
+  const [newPrixAchat, setNewPrixAchat]   = useState('')
+  const [newTypeAchat, setNewTypeAchat]   = useState<'unitaire' | 'gros'>('unitaire')
+  const [newUnites, setNewUnites]         = useState('1')
+  const [newPrixLot, setNewPrixLot]       = useState('0')
+  const [newStock, setNewStock]           = useState('0')
 
   // Supprimer
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
@@ -71,16 +75,18 @@ export function StockPage() {
 
   const saveEdit = async () => {
     if (!editArticle) return
-    const nom        = editNom.trim()
-    const prix       = parseFloat(editPrix)       || 0
-    const prix_achat = parseFloat(editPrixAchat)  || 0
-    const type_achat = editTypeAchat
+    const nom           = editNom.trim()
+    const prix          = parseFloat(editPrix)       || 0
+    const prix_achat    = parseFloat(editPrixAchat)  || 0
+    const type_achat    = editTypeAchat
+    const unites_par_lot = parseInt(editUnites) || 1
+    const prix_lot       = parseFloat(editPrixLot) || 0
     if (!nom) return
     setSaving(true)
-    setArticles(prev => prev.map(a => a.id === editArticle.id ? { ...a, nom, prix, prix_achat, type_achat } : a))
+    setArticles(prev => prev.map(a => a.id === editArticle.id ? { ...a, nom, prix, prix_achat, type_achat, unites_par_lot, prix_lot } : a))
     setEditArticle(null)
     showToast('Article mis à jour')
-    await supabase.from('usr_articles').update({ nom, prix, prix_achat, type_achat }).eq('id', editArticle.id)
+    await supabase.from('usr_articles').update({ nom, prix, prix_achat, type_achat, unites_par_lot, prix_lot }).eq('id', editArticle.id)
     setSaving(false)
   }
 
@@ -89,14 +95,17 @@ export function StockPage() {
     const nom = newNom.trim()
     if (!nom) return
     setSaving(true)
-    const prix       = parseFloat(newPrix)       || 0
-    const prix_achat = parseFloat(newPrixAchat)  || 0
-    const type_achat = newTypeAchat
-    const stock      = parseInt(newStock)        || 0
-    showToast(`"${nom}" ajouté`)
-    setShowAdd(false); setNewNom(''); setNewPrix(''); setNewPrixAchat(''); setNewTypeAchat('unitaire'); setNewStock('0')
-    await supabase.from('usr_articles').insert({ nom, prix, prix_achat, type_achat, stock })
+    const prix           = parseFloat(newPrix)      || 0
+    const prix_achat     = parseFloat(newPrixAchat) || 0
+    const type_achat     = newTypeAchat
+    const unites_par_lot = parseInt(newUnites) || 1
+    const prix_lot       = parseFloat(newPrixLot) || 0
+    const stock          = parseInt(newStock)       || 0
+    const { error } = await supabase.from('usr_articles').insert({ nom, prix, prix_achat, type_achat, unites_par_lot, prix_lot, stock })
     setSaving(false)
+    if (error) { showToast('Erreur — produit non enregistré'); return }
+    setShowAdd(false); setNewNom(''); setNewPrix(''); setNewPrixAchat(''); setNewTypeAchat('unitaire'); setNewUnites('1'); setNewPrixLot('0'); setNewStock('0')
+    showToast(`"${nom}" ajouté`)
     load()
   }
 
@@ -236,6 +245,11 @@ export function StockPage() {
                             {a.type_achat === 'gros' ? 'En gros' : 'Unitaire'}
                           </span>
                         </div>
+                        {a.type_achat === 'gros' && (a.unites_par_lot > 1 || a.prix_lot > 0) && (
+                          <p className="text-xs text-[#1B2A8A] mt-1">
+                            Lot : {a.unites_par_lot} unités · {fmt(a.prix_lot)}
+                          </p>
+                        )}
 
                         {/* Action chips */}
                         <div className="flex items-center gap-2 mt-2.5 flex-wrap">
@@ -248,7 +262,7 @@ export function StockPage() {
                           {isAdmin && (
                             <>
                               <button
-                                onClick={() => { setEditArticle(a); setEditNom(a.nom); setEditPrix(String(a.prix)); setEditPrixAchat(String(a.prix_achat || 0)); setEditTypeAchat(a.type_achat || 'unitaire') }}
+                                onClick={() => { setEditArticle(a); setEditNom(a.nom); setEditPrix(String(a.prix)); setEditPrixAchat(String(a.prix_achat || 0)); setEditTypeAchat(a.type_achat || 'unitaire'); setEditUnites(String(a.unites_par_lot || 1)); setEditPrixLot(String(a.prix_lot || 0)) }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-white text-gray-600 border-gray-200">
                                 <Pencil size={12} />Modifier
                               </button>
@@ -337,6 +351,20 @@ export function StockPage() {
                   ))}
                 </div>
               </div>
+              {editTypeAchat === 'gros' && (
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Unités / lot</label>
+                    <input type="number" value={editUnites} onChange={e => setEditUnites(e.target.value)} min="1"
+                      className="w-full bg-white border border-[#E8E2DC] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Prix du lot (HTG)</label>
+                    <input type="number" value={editPrixLot} onChange={e => setEditPrixLot(e.target.value)}
+                      className="w-full bg-white border border-[#E8E2DC] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  </div>
+                </div>
+              )}
               <button onClick={saveEdit} disabled={saving}
                 className="w-full bg-[#1B2A8A] text-white py-4 rounded-2xl font-bold active:scale-[0.98] transition-transform disabled:opacity-50">
                 Enregistrer
@@ -389,6 +417,20 @@ export function StockPage() {
                   ))}
                 </div>
               </div>
+              {newTypeAchat === 'gros' && (
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Unités / lot</label>
+                    <input type="number" value={newUnites} onChange={e => setNewUnites(e.target.value)} min="1"
+                      className="w-full bg-white border border-[#E8E2DC] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Prix du lot (HTG)</label>
+                    <input type="number" value={newPrixLot} onChange={e => setNewPrixLot(e.target.value)}
+                      className="w-full bg-white border border-[#E8E2DC] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#1B2A8A]" />
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-xs text-gray-400 font-semibold uppercase tracking-widest mb-1.5 block">Stock initial</label>
                 <input type="number" value={newStock} onChange={e => setNewStock(e.target.value)}

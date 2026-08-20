@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'employe'
-export type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2'
+export type TypeFrais = 'inscription' | 'formation_v1' | 'formation_v2' | 'graduation'
 
 export interface Session {
   role: Role
@@ -25,6 +25,7 @@ export interface Cours {
   frais_inscription: number
   frais_formation_v1: number
   frais_formation_v2: number
+  frais_graduation: number
   actif: boolean
   created_at: string
 }
@@ -47,6 +48,8 @@ export interface Etudiant {
   frais_formation_v1_paye: number
   frais_formation_v2: number
   frais_formation_v2_paye: number
+  frais_graduation: number
+  frais_graduation_paye: number
   actif: boolean
   created_at: string
 }
@@ -57,6 +60,8 @@ export interface Article {
   prix: number
   prix_achat: number
   type_achat: 'unitaire' | 'gros'
+  unites_par_lot: number
+  prix_lot: number
   stock: number
   actif: boolean
   created_at: string
