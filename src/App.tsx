@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { TypeFrais } from './types'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { AppShell } from './components/app-shell'
@@ -36,6 +37,7 @@ function AppContent() {
   const { session, loading, appActive } = useAuth()
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [ventesPreselect, setVentesPreselect] = useState<number | null>(null)
+  const [ventesPreselectFrais, setVentesPreselectFrais] = useState<TypeFrais | null>(null)
 
   if (loading) {
     return (
@@ -63,8 +65,8 @@ function AppContent() {
   const renderPage = () => {
     switch (effectivePage) {
       case 'dashboard':  return <DashboardPage onNavigate={handleNavigate} />
-      case 'etudiants':  return <EtudiantsPage onPayEtudiant={(id) => { setVentesPreselect(id); handleNavigate('ventes') }} />
-      case 'ventes':     return <VentesPage preselectStudentId={ventesPreselect} onMounted={() => setVentesPreselect(null)} />
+      case 'etudiants':  return <EtudiantsPage onPayEtudiant={(id, ft) => { setVentesPreselect(id); setVentesPreselectFrais(ft ?? null); handleNavigate('ventes') }} />
+      case 'ventes':     return <VentesPage preselectStudentId={ventesPreselect} preselectFraisType={ventesPreselectFrais} onMounted={() => { setVentesPreselect(null); setVentesPreselectFrais(null) }} />
       case 'stock':      return <StockPage />
       case 'rapports':   return <RapportsPage onPayEtudiant={(id) => { setVentesPreselect(id); handleNavigate('ventes') }} />
       case 'parametres': return <ParametresPage />
