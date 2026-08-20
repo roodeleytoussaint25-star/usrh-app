@@ -243,8 +243,8 @@ export function ReceiptModal({ venteId, directData, onClose }: Props) {
                 )}
 
                 <p className="text-center my-2">{SEP}</p>
-                <p className="text-center font-bold mb-1">Mesi pou konfyans ou !</p>
-                <p className="text-center text-[10px] text-gray-500">Dokiman ofisyel — USRH</p>
+                <p className="text-center font-bold mb-1">Merci pour votre confiance !</p>
+                <p className="text-center text-[10px] text-gray-500">Document officiel — USRH</p>
               </div>
             )}
           </div>
